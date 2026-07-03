@@ -1,5 +1,7 @@
 # Build artifacts
 build/
+build-*/
+cmake-build-*/
 *.o
 *.so
 *.dll
@@ -8,6 +10,10 @@ build/
 *.out
 *.obj
 *.lib
+*.a
+
+# Third-party (downloaded by setup.sh)
+third_party/imgui/
 
 # IDE
 .idea/
