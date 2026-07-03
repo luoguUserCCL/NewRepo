@@ -1,0 +1,43 @@
+plugins {
+    id 'java-library'
+    id 'application'
+}
+
+application {
+    mainClass = 'com.calc.Calculator'
+}
+
+// The JAR bundles native libraries for all platforms
+// They are extracted at runtime by NativeLoader
+
+dependencies {
+    // No external Java dependencies
+}
+
+// Task to copy native libraries into JAR resources
+tasks.register('copyNativeLibs', Copy) {
+    def nativeBuildDir = project(':jni-bridge').layout.buildDirectory.dir('libs')
+
+    from(nativeBuildDir) {
+        include '**/*.so'
+        include '**/*.dll'
+        include '**/*.dylib'
+    }
+
+    into layout.projectDirectory.dir('src/main/resources/native')
+}
+
+jar {
+    dependsOn 'copyNativeLibs'
+    from('src/main/resources') {
+        include 'native/**'
+    }
+
+    manifest {
+        attributes(
+            'Main-Class': 'com.calc.Calculator',
+            'Implementation-Title': 'Scientific Calculator',
+            'Implementation-Version': project.version
+        )
+    }
+}

@@ -1,0 +1,30 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+*.obj
+*.lib
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.clangd/
+compile_commands.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradle
+.gradle/
+gradle/wrapper/gradle-wrapper.jar
+
+# Secrets
+*.pat
+.pat_token
+encoded.txt

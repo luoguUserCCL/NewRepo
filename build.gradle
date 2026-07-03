@@ -1,0 +1,8 @@
+project.version = '1.0.0'
+project.group = 'com.calc'
+
+subprojects {
+    repositories {
+        mavenCentral()
+    }
+}

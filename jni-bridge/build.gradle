@@ -1,0 +1,50 @@
+plugins {
+    id 'cpp-library'
+}
+
+library {
+    // JNI bridge is a shared library (.so/.dll/.dylib)
+    linkage = [Linkage.SHARED]
+
+    targetMachines = [
+        machines.linux.x86_64,
+        machines.windows.x86_64,
+        machines.macOS.x86_64
+    ]
+
+    publicHeaders {
+        from('src/main/cpp/public')
+    }
+
+    dependencies {
+        api project(':calc-core')
+        api project(':render-engine')
+    }
+}
+
+apply plugin: com.calc.build.CrossCompilePlugin
+
+tasks.withType(CppCompile).configureEach {
+    compilerArgs.addAll([
+        '-std=c++17',
+        '-Wall',
+        '-Wextra',
+        '-fPIC'
+    ])
+
+    // JNI include paths
+    def javaHome = System.getenv('JAVA_HOME') ?: '/usr/lib/jvm/default-java'
+    compilerArgs.addAll([
+        "-I${javaHome}/include",
+        "-I${javaHome}/include/linux",
+        "-I${javaHome}/include/win32",
+        "-I${javaHome}/include/darwin"
+    ])
+}
+
+tasks.withType(LinkSharedLibrary).configureEach {
+    linkerArgs.addAll([
+        '-lgmp',
+        '-lmpfr'
+    ])
+}

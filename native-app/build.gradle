@@ -1,0 +1,61 @@
+plugins {
+    id 'cpp-application'
+}
+
+application {
+    targetMachines = [
+        machines.linux.x86_64,
+        machines.windows.x86_64,
+        machines.macOS.x86_64
+    ]
+
+    dependencies {
+        implementation project(':calc-core')
+        implementation project(':render-engine')
+    }
+}
+
+apply plugin: com.calc.build.CrossCompilePlugin
+
+// Platform-specific source sets
+def platformDir = 'src/main/cpp/platform'
+
+tasks.withType(CppCompile).configureEach {
+    compilerArgs.addAll([
+        '-std=c++17',
+        '-Wall',
+        '-Wextra',
+        '-O2'
+    ])
+
+    // GMP/MPFR includes
+    def gmpInclude = System.getenv('GMP_INCLUDE') ?: '/usr/include'
+    def mpfrInclude = System.getenv('MPFR_INCLUDE') ?: '/usr/include'
+    compilerArgs.addAll(["-I${gmpInclude}", "-I${mpfrInclude}"])
+}
+
+tasks.withType(LinkExecutable).configureEach {
+    // Platform-specific linker settings
+    linkerArgs.addAll([
+        '-lgmp',
+        '-lmpfr',
+        '-lGL',
+        '-ldl'
+    ])
+
+    // GLFW linking
+    linkerArgs.add('-lglfw')
+}
+
+// Linux-specific compile task configuration
+tasks.matching { it.name.contains('linux') && it instanceof CppCompile }.configureEach {
+    compilerArgs.addAll(['-DPLATFORM_LINUX'])
+}
+
+tasks.matching { it.name.contains('windows') && it instanceof CppCompile }.configureEach {
+    compilerArgs.addAll(['-DPLATFORM_WINDOWS'])
+}
+
+tasks.matching { it.name.contains('macos') && it instanceof CppCompile }.configureEach {
+    compilerArgs.addAll(['-DPLATFORM_MACOS'])
+}

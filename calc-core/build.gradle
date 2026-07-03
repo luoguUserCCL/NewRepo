@@ -1,0 +1,47 @@
+plugins {
+    id 'cpp-library'
+}
+
+library {
+    // Core engine is a static library - linked into final executables
+    linkage = [Linkage.STATIC]
+
+    targetMachines = [
+        machines.linux.x86_64,
+        machines.windows.x86_64,
+        machines.macOS.x86_64
+    ]
+
+    // Public API headers
+    publicHeaders {
+        from('src/main/cpp/public')
+    }
+}
+
+// Apply custom toolchain management
+apply plugin: com.calc.build.CrossCompilePlugin
+
+// Compiler settings for all platforms
+tasks.withType(CppCompile).configureEach {
+    compilerArgs.addAll([
+        '-std=c++17',
+        '-Wall',
+        '-Wextra',
+        '-Wpedantic',
+        '-O2',
+        '-fPIC'
+    ])
+
+    // Define GMP/MPFR include paths
+    def gmpInclude = System.getenv('GMP_INCLUDE') ?: '/usr/include'
+    def mpfrInclude = System.getenv('MPFR_INCLUDE') ?: '/usr/include'
+    compilerArgs.addAll(["-I${gmpInclude}", "-I${mpfrInclude}"])
+}
+
+// Linker settings
+tasks.withType(LinkSharedLibrary).configureEach {
+    linkerArgs.addAll([
+        '-lgmp',
+        '-lmpfr'
+    ])
+}

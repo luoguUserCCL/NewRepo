@@ -1,0 +1,35 @@
+plugins {
+    id 'cpp-library'
+}
+
+library {
+    linkage = [Linkage.STATIC]
+
+    targetMachines = [
+        machines.linux.x86_64,
+        machines.windows.x86_64,
+        machines.macOS.x86_64
+    ]
+
+    publicHeaders {
+        from('src/main/cpp/public')
+    }
+
+    // Render engine depends on calc-core for AST types
+    dependencies {
+        api project(':calc-core')
+    }
+}
+
+apply plugin: com.calc.build.CrossCompilePlugin
+
+tasks.withType(CppCompile).configureEach {
+    compilerArgs.addAll([
+        '-std=c++17',
+        '-Wall',
+        '-Wextra',
+        '-Wpedantic',
+        '-O2',
+        '-fPIC'
+    ])
+}
