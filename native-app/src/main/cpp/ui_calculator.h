@@ -7,14 +7,19 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <calc/math_renderer.h>
+#include <calc/imgui_renderer.h>
 
 namespace calc {
 
 /**
- * Main calculator UI — expression input, result display, and history.
+ * Main calculator UI — expression input, formula preview, result display, and history.
+ * Integrates the math renderer for real-time formula visualization.
  */
 class UICalculator {
 public:
+    UICalculator() : renderer_(), showFormulaPreview_(true) {}
+
     void draw(AppState& state) {
         auto& io = ImGui::GetIO();
 
@@ -24,8 +29,10 @@ public:
         // Expression input
         float inputWidth = ImGui::GetContentRegionAvail().x - 120.0f;
         ImGui::PushItemWidth(inputWidth);
-        ImGui::InputText("##input", &state.inputText,
-            ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::InputText("##input", &state.inputText,
+            ImGuiInputTextFlags_EnterReturnsTrue)) {
+            state.execute();
+        }
         ImGui::PopItemWidth();
 
         ImGui::SameLine();
@@ -35,6 +42,11 @@ public:
         ImGui::SameLine();
         if (ImGui::Button(I18n::get("input.clear").c_str())) {
             state.clearInput();
+        }
+
+        // Formula preview — renders input as mathematical notation
+        if (showFormulaPreview_ && !state.inputText.empty()) {
+            drawFormulaPreview(state);
         }
 
         // Result display
@@ -54,6 +66,10 @@ public:
         // Format controls (inline)
         drawFormatControls(state);
 
+        // Formula preview toggle
+        ImGui::SameLine();
+        ImGui::Checkbox("Formula Preview", &showFormulaPreview_);
+
         ImGui::Spacing();
         ImGui::Separator();
 
@@ -63,29 +79,72 @@ public:
             ImGui::TextDisabled("%s", I18n::get("history.empty").c_str());
         } else {
             // Show history in reverse order (newest first)
+            ImGui::BeginChild("History", ImVec2(0, 0), ImGuiChildFlags_Borders);
             for (int i = static_cast<int>(state.history.size()) - 1; i >= 0; i--) {
                 const auto& entry = state.history[i];
                 ImGui::PushID(i);
+
+                // Input with formula rendering
                 if (entry.isError) {
                     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.3f, 0.3f, 1.0f));
                 }
-                ImGui::Text(">> %s", entry.input.c_str());
+
+                // Render input as clickable text
+                ImGui::Text(">> ");
+                ImGui::SameLine(0, 0);
+                if (ImGui::SmallButton(entry.input.c_str())) {
+                    state.inputText = entry.input;
+                }
+
+                // Result
                 ImGui::Text("   %s", entry.result.c_str());
+
                 if (entry.isError) {
                     ImGui::PopStyleColor();
                 }
 
-                // Click to re-use expression
-                if (ImGui::IsItemClicked()) {
-                    state.inputText = entry.input;
-                }
-                ImGui::PopID();
                 ImGui::Spacing();
+                ImGui::PopID();
             }
+            ImGui::EndChild();
         }
     }
 
 private:
+    MathRenderer renderer_;
+    bool showFormulaPreview_;
+    std::unique_ptr<LayoutNode> cachedLayout_;
+
+    void drawFormulaPreview(AppState& state) {
+        try {
+            auto ast = state.engine.parse(state.inputText);
+            if (ast) {
+                auto layout = renderer_.astToLayout(*ast, 20.0f);
+                if (layout) {
+                    renderer_.layout(layout);
+                    Vec2 size = renderer_.getSize(*layout);
+
+                    // Draw a frame for the formula preview
+                    float frameHeight = size.y + 16.0f;
+                    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.15f, 0.15f, 0.18f, 1.0f));
+                    ImGui::BeginChild("FormulaPreview",
+                        ImVec2(0, frameHeight), ImGuiChildFlags_Borders);
+                    {
+                        ImDrawList* drawList = ImGui::GetWindowDrawList();
+                        Vec2 pos(ImGui::GetCursorScreenPos().x + 8.0f,
+                                 ImGui::GetCursorScreenPos().y + 8.0f);
+                        ImGuiRenderer::render(*layout, pos, drawList,
+                            nullptr, nullptr, IM_COL32(200, 220, 255, 255));
+                    }
+                    ImGui::EndChild();
+                    ImGui::PopStyleColor();
+                }
+            }
+        } catch (...) {
+            // Don't show preview if parsing fails
+        }
+    }
+
     void drawFormatControls(AppState& state) {
         // Format mode
         const char* formatModes[] = {
