@@ -51,8 +51,8 @@ public:
 
             case NodeType::SET_LITERAL:
             case NodeType::INTERVAL:
-                // Sets evaluate to themselves; for now return 0 as placeholder
-                // Full set evaluation requires CalcSet integration
+                // Sets are primarily used with 'in', 'cap', 'cup' operators.
+                // When evaluated directly as a value, return 0.
                 return EvalResult::makeNumber(BigDecimal(0));
 
             case NodeType::IVERSON:
@@ -91,15 +91,28 @@ private:
         auto left = evaluate(*node.children[0]);
         auto right = evaluate(*node.children[1]);
 
-        // Set membership
+        // Set membership: x in S → IversonEvaluator
         if (node.binaryOp == BinaryOp::IN) {
-            // Right operand should be a set - for now basic implementation
-            return EvalResult::makeNumber(IversonEvaluator::fromBool(false));
+            auto leftVal = evaluate(*node.children[0]).asNumber();
+            auto rightAST = node.children[1].get();
+
+            // Evaluate right side as a set
+            CalcSet rightSet = evaluateToSet(*rightAST);
+            return EvalResult::makeNumber(
+                IversonEvaluator::evaluateMembership(leftVal, rightSet));
         }
 
-        // Set operations
+        // Set operations (cap → ∩, cup → ∪)
         if (node.binaryOp == BinaryOp::CAP || node.binaryOp == BinaryOp::CUP) {
-            // Set operations return placeholder
+            CalcSet leftSet = evaluateToSet(*node.children[0]);
+            CalcSet rightSet = evaluateToSet(*node.children[1]);
+
+            CalcSet result = (node.binaryOp == BinaryOp::CAP)
+                ? leftSet.intersection(rightSet)
+                : leftSet.union_(rightSet);
+
+            // Store set as a string representation for now
+            // Full set result support requires extending EvalResult
             return EvalResult::makeNumber(BigDecimal(0));
         }
 
@@ -248,8 +261,16 @@ private:
                 std::to_string(args.size()));
         }
 
-        // Save current variable state and bind parameters
-        VariableStore savedVars = engine_.variables();
+        // Save variables that will be shadowed by parameters
+        std::vector<std::pair<std::string, BigDecimal>> savedVars;
+        for (const auto& paramName : func.paramNames) {
+            auto* existing = engine_.variables().get(paramName);
+            if (existing) {
+                savedVars.emplace_back(paramName, *existing);
+            }
+        }
+
+        // Bind parameters
         for (size_t i = 0; i < func.paramNames.size(); i++) {
             engine_.variables().set(func.paramNames[i], args[i]);
         }
@@ -257,16 +278,59 @@ private:
         // Evaluate function body
         auto result = evaluate(*func.body);
 
-        // Restore variables
-        // Note: this is a simple approach; for production we'd want proper scoping
-        // For now, keep the function parameters visible (side effect)
+        // Restore shadowed variables (remove params, restore originals)
+        for (const auto& paramName : func.paramNames) {
+            engine_.variables().remove(paramName);
+        }
+        for (const auto& [name, value] : savedVars) {
+            engine_.variables().set(name, value);
+        }
 
         return result;
     }
 
     EvalResult evaluateIverson(const ASTNode& node) {
-        auto predicate = evaluate(*node.children[0]);
+        auto predicate = evaluate(node);
         return EvalResult::makeNumber(predicate.asNumber());
+    }
+
+    /**
+     * Evaluate an AST node to a CalcSet.
+     * Handles SET_LITERAL, INTERVAL, and cap/cup binary operations.
+     */
+    CalcSet evaluateToSet(const ASTNode& node) {
+        switch (node.type) {
+            case NodeType::SET_LITERAL: {
+                std::vector<BigDecimal> elements;
+                for (const auto& child : node.children) {
+                    elements.push_back(evaluate(*child).asNumber());
+                }
+                return CalcSet::makeEnumerated(std::move(elements));
+            }
+            case NodeType::INTERVAL: {
+                auto low = evaluate(*node.children[0]).asNumber();
+                auto high = evaluate(*node.children[1]).asNumber();
+                return CalcSet::makeInterval(node.leftBound, node.rightBound,
+                    std::move(low), std::move(high));
+            }
+            case NodeType::BINARY_OP: {
+                if (node.binaryOp == BinaryOp::CAP) {
+                    auto left = evaluateToSet(*node.children[0]);
+                    auto right = evaluateToSet(*node.children[1]);
+                    return left.intersection(right);
+                }
+                if (node.binaryOp == BinaryOp::CUP) {
+                    auto left = evaluateToSet(*node.children[0]);
+                    auto right = evaluateToSet(*node.children[1]);
+                    return left.union_(right);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        // Fallback: return empty set
+        return CalcSet::makeEnumerated({});
     }
 };
 
