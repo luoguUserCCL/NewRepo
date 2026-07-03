@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdint>
 #include <memory>
+#include <functional>
 
 namespace calc {
 
@@ -101,6 +102,17 @@ public:
     static int getDefaultPrecision();
     static void setDefaultPrecision(int precision);
     int getPrecision() const;
+
+    // MPFR direct access — allows functions.cpp to use MPFR directly
+    // for high-precision trig/log operations without losing precision
+    struct MpfrAccess {
+        const void* mpfrPtr;  ///< Pointer to underlying mpfr_t
+        int precision;
+    };
+    MpfrAccess getMpfrAccess() const;
+
+    /// Construct from an MPFR function result (internal use)
+    static BigDecimal fromMpfrResult(std::function<void(mpfr_t)> mpfrFunc, int precision);
 
 private:
     struct Impl;

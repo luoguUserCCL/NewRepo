@@ -156,6 +156,21 @@ private:
     }
 
     EvalResult evaluateFunction(const ASTNode& node) {
+        const std::string& name = node.funcName;
+
+        // ===== Special handling for sum/prod — need AST iteration =====
+        if (name == "sum" && node.children.size() == 4) {
+            return evaluateSum(node);
+        }
+        if (name == "prod" && node.children.size() == 4) {
+            return evaluateProd(node);
+        }
+
+        // ===== Iverson bracket with AST access =====
+        if (name == "Iverson" && node.children.size() == 1) {
+            return evaluateIverson(*node.children[0]);
+        }
+
         // Evaluate arguments
         std::vector<BigDecimal> args;
         for (const auto& child : node.children) {
@@ -163,18 +178,66 @@ private:
         }
 
         // Check built-in first
-        if (engine_.functions().isBuiltin(node.funcName)) {
-            auto result = engine_.functions().evalBuiltin(node.funcName, args);
+        if (engine_.functions().isBuiltin(name)) {
+            auto result = engine_.functions().evalBuiltin(name, args);
             return EvalResult::makeNumber(result);
         }
 
         // Check user-defined
-        const auto* userFunc = engine_.functions().getUserFunction(node.funcName);
+        const auto* userFunc = engine_.functions().getUserFunction(name);
         if (userFunc) {
             return evaluateUserFunction(*userFunc, args);
         }
 
-        throw std::runtime_error("Undefined function: " + node.funcName);
+        throw std::runtime_error("Undefined function: " + name);
+    }
+
+    /**
+     * Evaluate sum(i, start, end, expr)
+     * Iterates i from start to end (inclusive), evaluates expr for each i,
+     * and accumulates the sum with full precision.
+     */
+    EvalResult evaluateSum(const ASTNode& node) {
+        // node.children: [i_name_as_var, start, end, expr]
+        // i_name is a VARIABLE_REF node
+        const std::string& varName = node.children[0]->identifier;
+        BigDecimal startVal = evaluate(*node.children[1]).asNumber();
+        BigDecimal endVal = evaluate(*node.children[2]).asNumber();
+
+        int64_t start = startVal.toInt64();
+        int64_t end = endVal.toInt64();
+
+        BigDecimal result(0);
+        for (int64_t i = start; i <= end; i++) {
+            engine_.variables().set(varName, BigDecimal(i));
+            auto termResult = evaluate(*node.children[3]);
+            result = result.add(termResult.asNumber());
+        }
+
+        return EvalResult::makeNumber(result);
+    }
+
+    /**
+     * Evaluate prod(i, start, end, expr)
+     * Iterates i from start to end (inclusive), evaluates expr for each i,
+     * and accumulates the product with full precision.
+     */
+    EvalResult evaluateProd(const ASTNode& node) {
+        const std::string& varName = node.children[0]->identifier;
+        BigDecimal startVal = evaluate(*node.children[1]).asNumber();
+        BigDecimal endVal = evaluate(*node.children[2]).asNumber();
+
+        int64_t start = startVal.toInt64();
+        int64_t end = endVal.toInt64();
+
+        BigDecimal result(1);
+        for (int64_t i = start; i <= end; i++) {
+            engine_.variables().set(varName, BigDecimal(i));
+            auto termResult = evaluate(*node.children[3]);
+            result = result.mul(termResult.asNumber());
+        }
+
+        return EvalResult::makeNumber(result);
     }
 
     EvalResult evaluateUserFunction(const UserFunction& func,

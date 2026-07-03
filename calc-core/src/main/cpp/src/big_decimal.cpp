@@ -345,4 +345,16 @@ int BigDecimal::getPrecision() const {
     return impl_->precision;
 }
 
+// ==================== MPFR Direct Access ====================
+
+BigDecimal::MpfrAccess BigDecimal::getMpfrAccess() const {
+    return MpfrAccess{static_cast<const void*>(&impl_->value), impl_->precision};
+}
+
+BigDecimal BigDecimal::fromMpfrResult(std::function<void(mpfr_t)> mpfrFunc, int precision) {
+    BigDecimal result(precision);
+    mpfrFunc(result.impl_->value);
+    return result;
+}
+
 } // namespace calc
