@@ -20,6 +20,7 @@ namespace calc {
 class CalcEngine {
 public:
     CalcEngine();
+    ~CalcEngine();
 
     /// Evaluate an input string and return the result
     EvalResult evaluate(const std::string& input);

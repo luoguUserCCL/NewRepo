@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <functional>
+#include <mpfr.h>
 
 namespace calc {
 

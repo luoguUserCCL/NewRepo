@@ -112,7 +112,8 @@ int runApp(int argc, char** argv) {
                 0x2500, 0x257F, // Box Drawing
                 0x25A0, 0x25FF, // Geometric Shapes
                 0x2600, 0x26FF, // Miscellaneous Symbols
-                0x1D400, 0x1D7FF, // Mathematical Alphanumeric Symbols
+                // Note: Mathematical Alphanumeric Symbols (0x1D400-0x1D7FF) omitted -
+                // exceeds 16-bit ImWchar range and causes narrowing conversion error
                 0,
             };
             fontCJK = io.Fonts->AddFontFromFileTTF(

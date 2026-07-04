@@ -1,6 +1,7 @@
 #include <calc/crypto_random.h>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 
 #ifdef PLATFORM_LINUX
 #include <fstream>

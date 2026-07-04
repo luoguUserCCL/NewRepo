@@ -4,6 +4,17 @@
 
 namespace calc {
 
+// Detect base from prefix: 0b→2, 0o→8, 0x→16, default→10
+static int detectBase(const std::string& input) {
+    if (input.size() > 2) {
+        std::string prefix = input.substr(0, 2);
+        if (prefix == "0b" || prefix == "0B") return 2;
+        if (prefix == "0o" || prefix == "0O") return 8;
+        if (prefix == "0x" || prefix == "0X") return 16;
+    }
+    return 10;
+}
+
 std::string BaseConverter::toString(const BigDecimal& value, int base,
                                       FormatMode mode, int digits) {
     if (base < 2 || base > 16) {

@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <calc/big_decimal.h>
+#include <calc/expression.h>  // for BinaryOp
 
 namespace calc {
 
@@ -76,6 +77,9 @@ public:
 
     /// Set union (cup → ∪)
     CalcSet union_(const CalcSet& other) const;
+
+    /// Deep clone (CalcSet is move-only due to unique_ptr)
+    CalcSet clone() const;
 
     /// Debug string representation
     std::string toString() const;

@@ -30,10 +30,10 @@ static bool fileExists(const std::string& path) {
 static SystemFontResult searchPaths(const std::vector<std::string>& candidates) {
     for (const auto& path : candidates) {
         if (fileExists(path)) {
-            return {true, path};
+            return SystemFontResult{true, path};
         }
     }
-    return {false, ""};
+    return SystemFontResult{false, std::string()};
 }
 
 SystemFontResult findNotoSansSC() {

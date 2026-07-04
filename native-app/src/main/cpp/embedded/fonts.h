@@ -3,12 +3,15 @@
 
 #include <cstddef>
 #include <cstdint>
-
-namespace calc { namespace embedded {
+#include <string>
 
 // Latin Modern Math — the primary math rendering font.
 // Embedded directly into the binary for zero external dependencies.
+// Included outside the namespace block because font_latinmodern_math.h
+// already defines its own namespace calc { namespace embedded { ... } }
 #include "font_latinmodern_math.h"
+
+namespace calc { namespace embedded {
 
 /**
  * Get the embedded Latin Modern Math font data.

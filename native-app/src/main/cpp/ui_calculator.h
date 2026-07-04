@@ -29,7 +29,7 @@ public:
         // Expression input
         float inputWidth = ImGui::GetContentRegionAvail().x - 120.0f;
         ImGui::PushItemWidth(inputWidth);
-        if (ImGui::InputText("##input", &state.inputText,
+        if (ImGui::InputText("##input", state.inputBuf, sizeof(state.inputBuf),
             ImGuiInputTextFlags_EnterReturnsTrue)) {
             state.execute();
         }
@@ -37,6 +37,7 @@ public:
 
         ImGui::SameLine();
         if (ImGui::Button(I18n::get("input.evaluate").c_str())) {
+            state.syncBuffersToStrings();
             state.execute();
         }
         ImGui::SameLine();
@@ -45,6 +46,8 @@ public:
         }
 
         // Formula preview — renders input as mathematical notation
+        // Sync buffer before checking content
+        state.syncBuffersToStrings();
         if (showFormulaPreview_ && !state.inputText.empty()) {
             drawFormulaPreview(state);
         }
@@ -94,6 +97,7 @@ public:
                 ImGui::SameLine(0, 0);
                 if (ImGui::SmallButton(entry.input.c_str())) {
                     state.inputText = entry.input;
+                    state.syncStringsToBuffers();
                 }
 
                 // Result

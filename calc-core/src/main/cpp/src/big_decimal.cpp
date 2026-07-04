@@ -1,5 +1,4 @@
 #include <calc/big_decimal.h>
-#include <mpfr.h>
 #include <gmp.h>
 #include <cstring>
 #include <cstdlib>
@@ -7,6 +6,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <mutex>
+#include <atomic>
 
 namespace calc {
 

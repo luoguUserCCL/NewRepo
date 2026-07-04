@@ -37,13 +37,11 @@ bool CalcSet::contains(const BigDecimal& value) const {
             }
             return false;
         } else if constexpr (std::is_same_v<T, Interval>) {
-            // Check lower bound
             if (d.leftBound == BoundType::CLOSED) {
                 if (value < d.low) return false;
             } else {
                 if (value <= d.low) return false;
             }
-            // Check upper bound
             if (d.rightBound == BoundType::CLOSED) {
                 if (value > d.high) return false;
             } else {
@@ -53,7 +51,7 @@ bool CalcSet::contains(const BigDecimal& value) const {
         } else if constexpr (std::is_same_v<T, Computed>) {
             if (d.op == SetOp::UNION) {
                 return d.left->contains(value) || d.right->contains(value);
-            } else { // INTERSECTION
+            } else {
                 return d.left->contains(value) && d.right->contains(value);
             }
         }
@@ -62,15 +60,29 @@ bool CalcSet::contains(const BigDecimal& value) const {
 }
 
 CalcSet CalcSet::intersection(const CalcSet& other) const {
-    return makeComputed(SetOp::INTERSECTION, *this, other);
+    return makeComputed(SetOp::INTERSECTION, clone(), other.clone());
 }
 
 CalcSet CalcSet::union_(const CalcSet& other) const {
-    return makeComputed(SetOp::UNION, *this, other);
+    return makeComputed(SetOp::UNION, clone(), other.clone());
+}
+
+CalcSet CalcSet::clone() const {
+    return std::visit([](const auto& d) -> CalcSet {
+        using T = std::decay_t<decltype(d)>;
+        if constexpr (std::is_same_v<T, Enumerated>) {
+            return makeEnumerated(std::vector<BigDecimal>(d.elements));
+        } else if constexpr (std::is_same_v<T, Interval>) {
+            return makeInterval(d.leftBound, d.rightBound, d.low, d.high);
+        } else if constexpr (std::is_same_v<T, Computed>) {
+            return makeComputed(d.op, d.left->clone(), d.right->clone());
+        }
+        return makeEnumerated({});
+    }, data_);
 }
 
 std::string CalcSet::toString() const {
-    return std::visit([&](const auto& d) -> std::string {
+    return std::visit([](const auto& d) -> std::string {
         using T = std::decay_t<decltype(d)>;
         if constexpr (std::is_same_v<T, Enumerated>) {
             std::string s = "{";
@@ -87,7 +99,7 @@ std::string CalcSet::toString() const {
             s += (d.rightBound == BoundType::CLOSED ? "]" : ")");
             return s;
         } else if constexpr (std::is_same_v<T, Computed>) {
-            std::string opStr = (d.op == SetOp::UNION) ? " ∪ " : " ∩ ";
+            std::string opStr = (d.op == SetOp::UNION) ? " cup " : " cap ";
             return d.left->toString() + opStr + d.right->toString();
         }
         return "{}";

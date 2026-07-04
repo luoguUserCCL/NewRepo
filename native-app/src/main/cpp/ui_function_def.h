@@ -18,23 +18,25 @@ public:
                 ImGui::Text("%s:", I18n::get("func.name").c_str());
                 ImGui::SameLine();
                 ImGui::PushItemWidth(120);
-                ImGui::InputText("##funcname", &state.newFuncName);
+                ImGui::InputText("##funcname", state.newFuncNameBuf, sizeof(state.newFuncNameBuf));
                 ImGui::PopItemWidth();
 
                 ImGui::Text("%s:", I18n::get("func.params").c_str());
                 ImGui::SameLine();
                 ImGui::PushItemWidth(200);
-                ImGui::InputText("##funcparams", &state.newFuncParams);
+                ImGui::InputText("##funcparams", state.newFuncParamsBuf, sizeof(state.newFuncParamsBuf));
                 ImGui::PopItemWidth();
                 ImGui::SameLine();
                 ImGui::TextDisabled("(e.g. x,y)");
 
                 ImGui::Text("%s:", I18n::get("func.body").c_str());
                 ImGui::PushItemWidth(-1);
-                ImGui::InputText("##funcbody", &state.newFuncBody);
+                ImGui::InputText("##funcbody", state.newFuncBodyBuf, sizeof(state.newFuncBodyBuf));
                 ImGui::PopItemWidth();
 
                 if (ImGui::Button(I18n::get("btn.add").c_str())) {
+                    // Sync buffers before reading
+                    state.syncBuffersToStrings();
                     // Parse parameter list
                     std::vector<std::string> params;
                     std::string param;
@@ -58,6 +60,9 @@ public:
                     state.newFuncName.clear();
                     state.newFuncParams.clear();
                     state.newFuncBody.clear();
+                    state.newFuncNameBuf[0] = '\0';
+                    state.newFuncParamsBuf[0] = '\0';
+                    state.newFuncBodyBuf[0] = '\0';
                 }
 
                 ImGui::Spacing();
@@ -85,19 +90,22 @@ public:
                 ImGui::Text("%s:", I18n::get("var.name").c_str());
                 ImGui::SameLine();
                 ImGui::PushItemWidth(120);
-                ImGui::InputText("##varname", &state.newVarName);
+                ImGui::InputText("##varname", state.newVarNameBuf, sizeof(state.newVarNameBuf));
                 ImGui::PopItemWidth();
 
                 ImGui::Text("%s:", I18n::get("var.value").c_str());
                 ImGui::PushItemWidth(-1);
-                ImGui::InputText("##varvalue", &state.newVarValue);
+                ImGui::InputText("##varvalue", state.newVarValueBuf, sizeof(state.newVarValueBuf));
                 ImGui::PopItemWidth();
 
                 if (ImGui::Button(I18n::get("btn.add").c_str())) {
+                    state.syncBuffersToStrings();
                     std::string definition = state.newVarName + " := " + state.newVarValue;
                     state.engine.evaluate(definition);
                     state.newVarName.clear();
                     state.newVarValue.clear();
+                    state.newVarNameBuf[0] = '\0';
+                    state.newVarValueBuf[0] = '\0';
                 }
 
                 ImGui::Spacing();

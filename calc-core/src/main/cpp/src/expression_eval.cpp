@@ -1,5 +1,6 @@
 #include <calc/calc_engine.h>
 #include <calc/set_operations.h>
+#include <calc/expression_parser.h>
 #include <mpfr.h>
 #include <stdexcept>
 #include <cmath>
@@ -310,7 +311,14 @@ private:
             case NodeType::INTERVAL: {
                 auto low = evaluate(*node.children[0]).asNumber();
                 auto high = evaluate(*node.children[1]).asNumber();
-                return CalcSet::makeInterval(node.leftBound, node.rightBound,
+                // Convert BoundType from expression.h to CalcSet::BoundType
+                auto toSetBound = [](BoundType bt) -> CalcSet::BoundType {
+                    return bt == BoundType::CLOSED
+                        ? CalcSet::BoundType::CLOSED
+                        : CalcSet::BoundType::OPEN;
+                };
+                return CalcSet::makeInterval(toSetBound(node.leftBound),
+                    toSetBound(node.rightBound),
                     std::move(low), std::move(high));
             }
             case NodeType::BINARY_OP: {
@@ -347,6 +355,8 @@ CalcEngine::CalcEngine() : impl_(std::make_unique<Impl>()) {
     impl_->functionRegistry.registerBuiltins();
     impl_->variableStore.registerConstants();
 }
+
+CalcEngine::~CalcEngine() = default;
 
 EvalResult CalcEngine::evaluate(const std::string& input) {
     try {

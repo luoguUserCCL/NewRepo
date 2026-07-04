@@ -36,3 +36,5 @@ gradle/wrapper/gradle-wrapper.jar
 *.pat
 .pat_token
 encoded.txt
+.local/
+build/

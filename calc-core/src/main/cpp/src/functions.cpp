@@ -161,7 +161,7 @@ void FunctionRegistry::registerBuiltins() {
                 return args[0].nthRoot(2);
             } else {
                 // a-th root of b = b^(1/a)
-                BigDecimal reciprocal = BigDecimal(1, args[0].getPrecision()).div(args[0]);
+                BigDecimal reciprocal = BigDecimal(int64_t(1), args[0].getPrecision()).div(args[0]);
                 return args[1].pow(reciprocal);
             }
         },
@@ -243,7 +243,7 @@ void FunctionRegistry::registerBuiltins() {
                 [](mpfr_t result, const mpfr_t arg, mpfr_rnd_t rnd) {
                     mpfr_cos(result, arg, rnd);
                 });
-            return BigDecimal(1, args[0].getPrecision()).div(cosVal);
+            return BigDecimal(int64_t(1), args[0].getPrecision()).div(cosVal);
         },
         RenderSpec{RenderSpec::Type::PARENTHESIS, "sec"},
         1, 1
@@ -256,7 +256,7 @@ void FunctionRegistry::registerBuiltins() {
                 [](mpfr_t result, const mpfr_t arg, mpfr_rnd_t rnd) {
                     mpfr_sin(result, arg, rnd);
                 });
-            return BigDecimal(1, args[0].getPrecision()).div(sinVal);
+            return BigDecimal(int64_t(1), args[0].getPrecision()).div(sinVal);
         },
         RenderSpec{RenderSpec::Type::PARENTHESIS, "csc"},
         1, 1
@@ -301,7 +301,7 @@ void FunctionRegistry::registerBuiltins() {
     // arccot = arctan(1/x)
     builtins_["arccot"] = BuiltinEntry{
         [](const std::vector<BigDecimal>& args) -> BigDecimal {
-            BigDecimal recip = BigDecimal(1, args[0].getPrecision()).div(args[0]);
+            BigDecimal recip = BigDecimal(int64_t(1), args[0].getPrecision()).div(args[0]);
             return mpfrUnaryOp(recip, recip.getPrecision(),
                 [](mpfr_t result, const mpfr_t arg, mpfr_rnd_t rnd) {
                     mpfr_atan(result, arg, rnd);
@@ -314,7 +314,7 @@ void FunctionRegistry::registerBuiltins() {
     // arcsec = arccos(1/x)
     builtins_["arcsec"] = BuiltinEntry{
         [](const std::vector<BigDecimal>& args) -> BigDecimal {
-            BigDecimal recip = BigDecimal(1, args[0].getPrecision()).div(args[0]);
+            BigDecimal recip = BigDecimal(int64_t(1), args[0].getPrecision()).div(args[0]);
             return mpfrUnaryOp(recip, recip.getPrecision(),
                 [](mpfr_t result, const mpfr_t arg, mpfr_rnd_t rnd) {
                     mpfr_acos(result, arg, rnd);
@@ -327,7 +327,7 @@ void FunctionRegistry::registerBuiltins() {
     // arccsc = arcsin(1/x)
     builtins_["arccsc"] = BuiltinEntry{
         [](const std::vector<BigDecimal>& args) -> BigDecimal {
-            BigDecimal recip = BigDecimal(1, args[0].getPrecision()).div(args[0]);
+            BigDecimal recip = BigDecimal(int64_t(1), args[0].getPrecision()).div(args[0]);
             return mpfrUnaryOp(recip, recip.getPrecision(),
                 [](mpfr_t result, const mpfr_t arg, mpfr_rnd_t rnd) {
                     mpfr_asin(result, arg, rnd);
