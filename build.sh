@@ -1,17 +1,12 @@
 #!/bin/bash
 # =====================================================================
-# build.sh — Pure Gradle-oriented build script for scientific-calculator
+# build.sh — Full cross-platform build for scientific-calculator
 # Builds 4 target variants:
-#   1. Linux x86_64 native   (system GCC)
-#   2. Windows x86_64        (MinGW-w64 cross-compile)
-#   3. macOS x86_64          (Zig c++ cross-compile)
-#   4. JAR                   (JNI bridge + Java wrapper)
-#
-# This script reads the same source/layout structure defined in the
-# Gradle build.gradle files but invokes the compilers directly since
-# Gradle's cpp-application plugin has limited cross-compile support.
+#   1. Linux x86_64 native   (system GCC + shared GLFW)
+#   2. Windows x86_64        (MinGW-w64 cross-compile, static)
+#   3. macOS aarch64         (Zig c++ cross-compile, static)
+#   4. JAR                   (JNI bridge + Java wrapper, 3-platform)
 # =====================================================================
-
 set -euo pipefail
 
 # ==================== Project Paths ====================
@@ -19,22 +14,11 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOCAL_PREFIX="$ROOT/.local"
 THIRD_PARTY="$ROOT/third_party"
 IMGUI_DIR="$THIRD_PARTY/imgui"
+GLAD_DIR="$THIRD_PARTY/glad"
 BUILD_DIR="$ROOT/build"
+MACOS_SDK="$LOCAL_PREFIX/MacOSX14.5.sdk"
 
-# ==================== Compiler Settings ====================
-CXX_COMMON="-std=c++17 -Wall -Wextra -O2 -fPIC"
-
-# Include paths
-GMP_INC="/usr/include/x86_64-linux-gnu"
-MPFR_INC="$LOCAL_PREFIX/include"
-LOCAL_INC="$LOCAL_PREFIX/include"
-CALC_CORE_PUBLIC="$ROOT/calc-core/src/main/cpp/public"
-RENDER_ENGINE_PUBLIC="$ROOT/render-engine/src/main/cpp/public"
-JNI_BRIDGE_PUBLIC="$ROOT/jni-bridge/src/main/cpp/public"
-NATIVE_APP_DIR="$ROOT/native-app/src/main/cpp"
-EMBEDDED_DIR="$NATIVE_APP_DIR/embedded"
-
-# ==================== Source Files ====================
+# ==================== Source Lists ====================
 CALC_CORE_SOURCES=(
     calc-core/src/main/cpp/src/big_decimal.cpp
     calc-core/src/main/cpp/src/expression.cpp
@@ -80,32 +64,32 @@ info() { echo -e "\033[1;34m[INFO]\033[0m $*"; }
 ok()   { echo -e "\033[1;32m[ OK ]\033[0m $*"; }
 fail() { echo -e "\033[1;31m[FAIL]\033[0m $*"; exit 1; }
 
-# Convert source paths to absolute
 abs_sources() {
-    local arr=("$@")
     local result=()
-    for s in "${arr[@]}"; do
-        if [[ "$s" == /* ]]; then
-            result+=("$s")
-        else
-            result+=("$ROOT/$s")
-        fi
+    for s in "$@"; do
+        if [[ "$s" == /* ]]; then result+=("$s"); else result+=("$ROOT/$s"); fi
     done
     echo "${result[@]}"
 }
 
-# ==================== Build Functions ====================
-
+# ==================== Build Linux ====================
 build_linux() {
     info "========== Building Linux x86_64 Native =========="
     local OUT="$BUILD_DIR/linux"
     mkdir -p "$OUT/obj"
 
     local CXX="g++"
-    local INCLUDES="-I$GMP_INC -I$MPFR_INC -I$LOCAL_INC -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$NATIVE_APP_DIR -I$EMBEDDED_DIR"
-    local FLAGS="$CXX_COMMON -DPLATFORM_LINUX -DEMBED_FONTS"
+    local GMP_INC="$LOCAL_PREFIX/include"
+    local MPFR_INC="$LOCAL_PREFIX/include"
+    local CALC_CORE_PUBLIC="$ROOT/calc-core/src/main/cpp/public"
+    local RENDER_ENGINE_PUBLIC="$ROOT/render-engine/src/main/cpp/public"
+    local NATIVE_APP_DIR="$ROOT/native-app/src/main/cpp"
+    local EMBEDDED_DIR="$NATIVE_APP_DIR/embedded"
 
-    # Compile calc-core (static library)
+    local INCLUDES="-I$GMP_INC -I$MPFR_INC -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$GLAD_DIR/include -I$NATIVE_APP_DIR -I$EMBEDDED_DIR -I$LOCAL_PREFIX/include"
+    local FLAGS="-std=c++17 -Wall -Wextra -O2 -fPIC -DPLATFORM_LINUX -DEMBED_FONTS -DIMGUI_IMPL_OPENGL_LOADER_GLAD"
+
+    # Compile calc-core
     info "  Compiling calc-core..."
     local CORE_OBJS=()
     for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
@@ -114,9 +98,9 @@ build_linux() {
         CORE_OBJS+=("$obj")
     done
     ar rcs "$OUT/libcalc-core.a" "${CORE_OBJS[@]}"
-    ok "  calc-core static library built"
+    ok "  calc-core built"
 
-    # Compile render-engine (static library)
+    # Compile render-engine
     info "  Compiling render-engine..."
     local RENDER_OBJS=()
     for src in $(abs_sources "${RENDER_ENGINE_SOURCES[@]}"); do
@@ -125,9 +109,9 @@ build_linux() {
         RENDER_OBJS+=("$obj")
     done
     ar rcs "$OUT/librender-engine.a" "${RENDER_OBJS[@]}"
-    ok "  render-engine static library built"
+    ok "  render-engine built"
 
-    # Compile ImGui sources
+    # Compile ImGui
     info "  Compiling Dear ImGui..."
     local IMGUI_OBJS=()
     for src in $(abs_sources "${IMGUI_SOURCES[@]}"); do
@@ -135,7 +119,9 @@ build_linux() {
         $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src"
         IMGUI_OBJS+=("$obj")
     done
-    ok "  Dear ImGui compiled"
+    # Also compile GLAD
+    $CXX $FLAGS $INCLUDES -c "$GLAD_DIR/src/gl.c" -o "$OUT/obj/glad_gl.o" || fail "Failed to compile glad"
+    ok "  Dear ImGui + GLAD built"
 
     # Compile native-app
     info "  Compiling native-app..."
@@ -150,55 +136,48 @@ build_linux() {
     # Link
     info "  Linking scientific-calculator..."
     $CXX -o "$OUT/scientific-calculator" \
-        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" \
-        -L"$OUT" -L"$LOCAL_PREFIX/lib" -L/usr/lib/x86_64-linux-gnu \
+        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" "$OUT/obj/glad_gl.o" \
+        -L"$OUT" -L"$LOCAL_PREFIX/lib" \
         -lrender-engine -lcalc-core \
-        -lmpfr -lgmp -lglfw -lGL -ldl -lpthread \
+        -lmpfr -lgmp -lglfw -lGL -ldl -lpthread -lX11 -lXrandr -lXinerama -lXcursor -lXi \
         || fail "Linking failed"
 
     ok "Linux build: $OUT/scientific-calculator"
     file "$OUT/scientific-calculator"
 }
 
+# ==================== Build Windows ====================
 build_windows() {
     info "========== Building Windows x86_64 (MinGW-w64) =========="
     local OUT="$BUILD_DIR/windows"
     mkdir -p "$OUT/obj"
 
-    # MinGW paths
-    local MINGW_BIN="$LOCAL_PREFIX/bin"
-    local MINGW_GPP="$MINGW_BIN/x86_64-w64-mingw32-g++"
-    local MINGW_AR="$MINGW_BIN/x86_64-w64-mingw32-ar"
-    local MINGW_SYSROOT="$LOCAL_PREFIX/x86_64-w64-mingw32"
-
-    if [[ ! -x "$MINGW_GPP" ]]; then
-        fail "MinGW-w64 not found at $MINGW_GPP"
-    fi
-
-    export PATH="$MINGW_BIN:$PATH"
+    export PATH="$LOCAL_PREFIX/bin:$PATH"
     local CXX="x86_64-w64-mingw32-g++"
+    local CC="x86_64-w64-mingw32-gcc"
     local AR="x86_64-w64-mingw32-ar"
+    local MINGW_B="-B$LOCAL_PREFIX/bin/"
+    local MINGW_SYSROOT="$LOCAL_PREFIX/x86_64-w64-mingw32"
+    local MINGW_EXTRA_INC="-I$LOCAL_PREFIX/share/mingw-w64/include"
 
-    # For Windows cross-compile, we won't have GMP/MPFR/GLFW built for MinGW
-    # So we compile what we can (calc-core + render-engine without external deps)
-    # and note that a full Windows build requires cross-compiled GMP/MPFR/GLFW
-    local INCLUDES="-I$MINGW_SYSROOT/include -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$NATIVE_APP_DIR -I$EMBEDDED_DIR"
-    local FLAGS="-std=c++17 -Wall -Wextra -O2 -DPLATFORM_WINDOWS -DWIN32_LEAN_AND_MEAN -D__USE_MINGW_ANSI_STDIO=1 -pipe -B$MINGW_BIN/"
+    local CALC_CORE_PUBLIC="$ROOT/calc-core/src/main/cpp/public"
+    local RENDER_ENGINE_PUBLIC="$ROOT/render-engine/src/main/cpp/public"
+    local NATIVE_APP_DIR="$ROOT/native-app/src/main/cpp"
+    local EMBEDDED_DIR="$NATIVE_APP_DIR/embedded"
+
+    local INCLUDES="$MINGW_EXTRA_INC -I$LOCAL_PREFIX/mingw/include -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$GLAD_DIR/include -I$NATIVE_APP_DIR -I$EMBEDDED_DIR -I$MINGW_SYSROOT/include"
+    local FLAGS="-std=c++17 -Wall -Wextra -O2 -DPLATFORM_WINDOWS -DWIN32_LEAN_AND_MEAN -D__USE_MINGW_ANSI_STDIO=1 -DEMBED_FONTS -DIMGUI_IMPL_OPENGL_LOADER_GLAD -pipe $MINGW_B"
 
     # Compile calc-core
     info "  Compiling calc-core for Windows..."
     local CORE_OBJS=()
     for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
         local obj="$OUT/obj/$(basename "$src" .cpp).o"
-        $CXX $FLAGS $INCLUDES -I$GMP_INC -I$MPFR_INC -c "$src" -o "$obj" 2>&1 || {
-            # If GMP/MPFR headers fail, try with stub defines
-            info "  Retrying $src with compatibility flags..."
-            $CXX $FLAGS $INCLUDES -DGMP_HEADER_INCLUDE -DMPFR_HEADER_INCLUDE -c "$src" -o "$obj" 2>&1 || fail "Failed to compile $src for Windows"
-        }
+        $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for Windows"
         CORE_OBJS+=("$obj")
     done
     $AR rcs "$OUT/libcalc-core.a" "${CORE_OBJS[@]}"
-    ok "  calc-core static library built for Windows"
+    ok "  calc-core built for Windows"
 
     # Compile render-engine
     info "  Compiling render-engine for Windows..."
@@ -209,7 +188,7 @@ build_windows() {
         RENDER_OBJS+=("$obj")
     done
     $AR rcs "$OUT/librender-engine.a" "${RENDER_OBJS[@]}"
-    ok "  render-engine static library built for Windows"
+    ok "  render-engine built for Windows"
 
     # Compile ImGui
     info "  Compiling Dear ImGui for Windows..."
@@ -219,7 +198,8 @@ build_windows() {
         $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for Windows"
         IMGUI_OBJS+=("$obj")
     done
-    ok "  Dear ImGui compiled for Windows"
+    $CC $FLAGS $INCLUDES -c "$GLAD_DIR/src/gl.c" -o "$OUT/obj/glad_gl.o" || fail "Failed to compile glad for Windows"
+    ok "  Dear ImGui + GLAD built for Windows"
 
     # Compile native-app
     info "  Compiling native-app for Windows..."
@@ -231,56 +211,50 @@ build_windows() {
     done
     ok "  native-app compiled for Windows"
 
-    # Link — note: GMP/MPFR/GLFW for Windows need to be cross-compiled first
-    # For now, link with what we have
+    # Link — static linking for Windows
     info "  Linking scientific-calculator.exe..."
     $CXX -o "$OUT/scientific-calculator.exe" \
-        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" \
-        -L"$OUT" -L"$MINGW_SYSROOT/lib" \
-        -lrender-engine -lcalc-core \
-        -lopengl32 -lgdi32 -lshell32 -luser32 -lkernel32 -ladvapi32 \
-        -lmingw32 -lmoldname -lmingwex -lmsvcrt \
-        -lpthread \
-        -static \
-        2>&1 || {
-        info "  Note: Windows link requires cross-compiled GMP/MPFR/GLFW"
-        info "  Building partial Windows object archive instead..."
-        $AR rcs "$OUT/scientific-calculator-objs.a" \
-            "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" \
-            "${CORE_OBJS[@]}" "${RENDER_OBJS[@]}"
-        ok "  Windows partial build: $OUT/scientific-calculator-objs.a (needs GMP/MPFR/GLFW for full link)"
-        return 0
-    }
+        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" "$OUT/obj/glad_gl.o" \
+        -L"$OUT" -L"$LOCAL_PREFIX/mingw/lib" \
+        -lrender-engine -lcalc-core -lglfw3 -lmpfr -lgmp \
+        -lopengl32 -lgdi32 -lshell32 -luser32 -lkernel32 -ladvapi32 -limm32 -lbcrypt \
+        -static -static-libgcc -static-libstdc++ \
+        || fail "Linking Windows failed"
 
     ok "Windows build: $OUT/scientific-calculator.exe"
     file "$OUT/scientific-calculator.exe"
 }
 
+# ==================== Build macOS ====================
 build_macos() {
-    info "========== Building macOS x86_64 (Zig c++) =========="
+    info "========== Building macOS aarch64 (Zig c++) =========="
     local OUT="$BUILD_DIR/macos"
     mkdir -p "$OUT/obj"
 
     local ZIG="$LOCAL_PREFIX/bin/zig"
-    if [[ ! -x "$ZIG" ]]; then
-        fail "Zig not found at $ZIG"
-    fi
-
     local CXX="$ZIG c++"
-    local INCLUDES="-I$GMP_INC -I$MPFR_INC -I$LOCAL_INC -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$NATIVE_APP_DIR -I$EMBEDDED_DIR"
-    local FLAGS="-target x86_64-macos -std=c++17 -Wall -Wextra -O2 -DPLATFORM_MACOS -DEMBED_FONTS"
+    local CC="$ZIG cc"
+    local AR="$ZIG ar"
+    local TARGET="-target aarch64-macos"
+
+    local CALC_CORE_PUBLIC="$ROOT/calc-core/src/main/cpp/public"
+    local RENDER_ENGINE_PUBLIC="$ROOT/render-engine/src/main/cpp/public"
+    local NATIVE_APP_DIR="$ROOT/native-app/src/main/cpp"
+    local EMBEDDED_DIR="$NATIVE_APP_DIR/embedded"
+
+    local INCLUDES="-I$LOCAL_PREFIX/macos/include -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$IMGUI_DIR -I$IMGUI_DIR/backends -I$GLAD_DIR/include -I$NATIVE_APP_DIR -I$EMBEDDED_DIR -isystem $MACOS_SDK/usr/include -iframework $MACOS_SDK/System/Library/Frameworks"
+    local FLAGS="$TARGET -std=c++17 -Wall -Wextra -O2 -DPLATFORM_MACOS -DEMBED_FONTS -DIMGUI_IMPL_OPENGL_LOADER_GLAD -fobjc-arc"
 
     # Compile calc-core
     info "  Compiling calc-core for macOS..."
     local CORE_OBJS=()
     for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
         local obj="$OUT/obj/$(basename "$src" .cpp).o"
-        $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" 2>&1 || fail "Failed to compile $src for macOS"
+        $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for macOS"
         CORE_OBJS+=("$obj")
     done
-    # Use zig to create archive
-    $ZIG ar rcs "$OUT/libcalc-core.a" "${CORE_OBJS[@]}" 2>/dev/null || ar rcs "$OUT/libcalc-core.a" "${CORE_OBJS[@]}"
-    ok "  calc-core static library built for macOS"
+    $AR rcs "$OUT/libcalc-core.a" "${CORE_OBJS[@]}"
+    ok "  calc-core built for macOS"
 
     # Compile render-engine
     info "  Compiling render-engine for macOS..."
@@ -290,8 +264,8 @@ build_macos() {
         $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for macOS"
         RENDER_OBJS+=("$obj")
     done
-    $ZIG ar rcs "$OUT/librender-engine.a" "${RENDER_OBJS[@]}" 2>/dev/null || ar rcs "$OUT/librender-engine.a" "${RENDER_OBJS[@]}"
-    ok "  render-engine static library built for macOS"
+    $AR rcs "$OUT/librender-engine.a" "${RENDER_OBJS[@]}"
+    ok "  render-engine built for macOS"
 
     # Compile ImGui
     info "  Compiling Dear ImGui for macOS..."
@@ -301,7 +275,8 @@ build_macos() {
         $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for macOS"
         IMGUI_OBJS+=("$obj")
     done
-    ok "  Dear ImGui compiled for macOS"
+    $CC $TARGET -O2 $INCLUDES -c "$GLAD_DIR/src/gl.c" -o "$OUT/obj/glad_gl.o" || fail "Failed to compile glad for macOS"
+    ok "  Dear ImGui + GLAD built for macOS"
 
     # Compile native-app
     info "  Compiling native-app for macOS..."
@@ -313,72 +288,127 @@ build_macos() {
     done
     ok "  native-app compiled for macOS"
 
-    # Link — Zig bundles macOS libc++ but not GMP/MPFR/GLFW
+    # Link — use object files directly to avoid archive format issues with Zig's linker
     info "  Linking scientific-calculator for macOS..."
-    $CXX -target x86_64-macos -o "$OUT/scientific-calculator" \
-        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" \
-        -L"$OUT" \
-        -lrender-engine -lcalc-core \
-        -framework OpenGL -framework Cocoa -framework IOKit \
-        2>&1 || {
-        info "  Note: macOS link requires cross-compiled GMP/MPFR/GLFW"
-        info "  Building partial macOS object archive instead..."
-        ar rcs "$OUT/scientific-calculator-objs.a" \
-            "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" \
-            "${CORE_OBJS[@]}" "${RENDER_OBJS[@]}"
-        ok "  macOS partial build: $OUT/scientific-calculator-objs.a (needs GMP/MPFR/GLFW for full link)"
-        return 0
-    }
+    local FWFLAGS="-F$MACOS_SDK/System/Library/Frameworks"
+    local GLFW_OBJS=()
+    for obj in "$LOCAL_PREFIX/lib/macos-arm64"/glfw_*.o; do
+        GLFW_OBJS+=("$obj")
+    done
+    $CXX $TARGET -o "$OUT/scientific-calculator" \
+        "${APP_OBJS[@]}" "${IMGUI_OBJS[@]}" "$OUT/obj/glad_gl.o" \
+        "${CORE_OBJS[@]}" "${RENDER_OBJS[@]}" \
+        "${GLFW_OBJS[@]}" \
+        -L"$LOCAL_PREFIX/macos/lib" -L"$MACOS_SDK/usr/lib" \
+        -lmpfr -lgmp -lobjc \
+        $FWFLAGS -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo -framework Carbon \
+        -framework Foundation -framework AppKit \
+        -lc++ \
+        || fail "Linking macOS failed"
 
     ok "macOS build: $OUT/scientific-calculator"
     file "$OUT/scientific-calculator"
 }
 
+# ==================== Build JAR ====================
 build_jar() {
     info "========== Building JAR (Java Wrapper + JNI Bridge) =========="
     local OUT="$BUILD_DIR/jar"
     mkdir -p "$OUT"
 
-    local JAVA_HOME="${JAVA_HOME:-$(dirname $(dirname $(readlink -f $(which java))))}"
+    export LD_LIBRARY_PATH=/usr/lib/jvm/java-21-openjdk-amd64/lib:${LD_LIBRARY_PATH:-}
+    local JAVAC="/home/z/my-project/NewRepo/.local/bin/javac"
+    local JAR_TOOL="/home/z/my-project/NewRepo/.local/bin/jar"
+    local CALC_CORE_PUBLIC="$ROOT/calc-core/src/main/cpp/public"
+    local RENDER_ENGINE_PUBLIC="$ROOT/render-engine/src/main/cpp/public"
 
-    # Compile JNI bridge as shared library (Linux)
-    info "  Compiling JNI bridge shared library..."
+    # === Build JNI .so for Linux ===
+    info "  Building JNI bridge for Linux..."
     local CXX="g++"
-    local JNI_INCLUDES="-I$JAVA_HOME/include -I$JAVA_HOME/include/linux"
-    local INCLUDES="$JNI_INCLUDES -I$GMP_INC -I$MPFR_INC -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$JNI_BRIDGE_PUBLIC"
+    local JNI_INCLUDES="-I$LOCAL_PREFIX/jdk-include -I$LOCAL_PREFIX/jdk-include/linux"
+    local INCLUDES="$JNI_INCLUDES -I$LOCAL_PREFIX/include -I$CALC_CORE_PUBLIC"
+    local FLAGS="-std=c++17 -O2 -fPIC"
 
-    # First build calc-core + render-engine for JNI
     local CORE_OBJS=()
     for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
-        local obj="$OUT/obj/jni_core_$(basename "$src" .cpp).o"
-        $CXX $CXX_COMMON $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI"
+        local obj="$OUT/obj/linux_core_$(basename "$src" .cpp).o"
+        $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI"
         CORE_OBJS+=("$obj")
     done
 
-    local RENDER_OBJS=()
-    for src in $(abs_sources "${RENDER_ENGINE_SOURCES[@]}"); do
-        local obj="$OUT/obj/jni_re_$(basename "$src" .cpp).o"
-        $CXX $CXX_COMMON $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI"
-        RENDER_OBJS+=("$obj")
-    done
-
-    # JNI bridge source
     for src in $(abs_sources "${JNI_BRIDGE_SOURCES[@]}"); do
-        local obj="$OUT/obj/jni_bridge_$(basename "$src" .cpp).o"
-        $CXX $CXX_COMMON $INCLUDES -fPIC -c "$src" -o "$obj" || fail "Failed to compile $src for JNI"
-        # Link shared library
-        $CXX -shared -o "$OUT/libcalc-bridge.so" \
-            "$obj" "${CORE_OBJS[@]}" "${RENDER_OBJS[@]}" \
-            -L"$LOCAL_PREFIX/lib" -lgmp -lmpfr -ldl \
-            || fail "Failed to link JNI bridge"
+        local obj="$OUT/obj/linux_bridge_$(basename "$src" .cpp).o"
+        $CXX $FLAGS $INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI"
+        $CXX -shared -o "$OUT/libcalc-bridge-linux-x86_64.so" \
+            "$obj" "${CORE_OBJS[@]}" \
+            -L"$LOCAL_PREFIX/lib" -lmpfr -lgmp -ldl \
+            || fail "Failed to link JNI bridge for Linux"
     done
-    ok "  JNI bridge: $OUT/libcalc-bridge.so"
+    ok "  JNI bridge Linux: libcalc-bridge-linux-x86_64.so"
 
-    # Compile Java wrapper
+    # === Build JNI .dll for Windows ===
+    info "  Building JNI bridge for Windows..."
+    export PATH="$LOCAL_PREFIX/bin:$PATH"
+    local MINGW_CXX="x86_64-w64-mingw32-g++"
+    local MINGW_CC="x86_64-w64-mingw32-gcc"
+    local MINGW_AR="x86_64-w64-mingw32-ar"
+    local MINGW_B="-B$LOCAL_PREFIX/bin/"
+    local MINGW_EXTRA_INC="-I$LOCAL_PREFIX/share/mingw-w64/include"
+    local WIN_JNI_INCLUDES="-I$LOCAL_PREFIX/jdk-include -I$LOCAL_PREFIX/jdk-include/win32"
+    local WIN_INCLUDES="$WIN_JNI_INCLUDES $MINGW_EXTRA_INC -I$LOCAL_PREFIX/mingw/include -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -I$LOCAL_PREFIX/x86_64-w64-mingw32/include"
+    local WIN_FLAGS="-std=c++17 -O2 -D__USE_MINGW_ANSI_STDIO=1 -DWIN32_LEAN_AND_MEAN $MINGW_B"
+
+    local WIN_CORE_OBJS=()
+    for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
+        local obj="$OUT/obj/win_core_$(basename "$src" .cpp).o"
+        $MINGW_CXX $WIN_FLAGS $WIN_INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI Windows"
+        WIN_CORE_OBJS+=("$obj")
+    done
+
+    for src in $(abs_sources "${JNI_BRIDGE_SOURCES[@]}"); do
+        local obj="$OUT/obj/win_bridge_$(basename "$src" .cpp).o"
+        $MINGW_CXX $WIN_FLAGS $WIN_INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI Windows"
+        $MINGW_CXX -shared -o "$OUT/calc-bridge-windows-x86_64.dll" \
+            "$obj" "${WIN_CORE_OBJS[@]}" \
+            -L"$LOCAL_PREFIX/mingw/lib" -lmpfr -lgmp \
+            -static-libgcc -static-libstdc++ \
+            || fail "Failed to link JNI bridge for Windows"
+    done
+    ok "  JNI bridge Windows: calc-bridge-windows-x86_64.dll"
+
+    # === Build JNI .dylib for macOS ===
+    info "  Building JNI bridge for macOS..."
+    local ZIG="$LOCAL_PREFIX/bin/zig"
+    local MAC_CXX="$ZIG c++"
+    local MAC_CC="$ZIG cc"
+    local MAC_TARGET="-target aarch64-macos"
+    local MAC_JNI_INCLUDES="-I$LOCAL_PREFIX/jdk-include -I$LOCAL_PREFIX/jdk-include/darwin"
+    local MAC_INCLUDES="$MAC_JNI_INCLUDES -I$LOCAL_PREFIX/macos/include -I$CALC_CORE_PUBLIC -I$RENDER_ENGINE_PUBLIC -isystem $MACOS_SDK/usr/include -iframework $MACOS_SDK/System/Library/Frameworks"
+    local MAC_FLAGS="$MAC_TARGET -std=c++17 -O2 -fPIC"
+
+    local MAC_CORE_OBJS=()
+    for src in $(abs_sources "${CALC_CORE_SOURCES[@]}"); do
+        local obj="$OUT/obj/mac_core_$(basename "$src" .cpp).o"
+        $MAC_CXX $MAC_FLAGS $MAC_INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI macOS"
+        MAC_CORE_OBJS+=("$obj")
+    done
+
+    for src in $(abs_sources "${JNI_BRIDGE_SOURCES[@]}"); do
+        local obj="$OUT/obj/mac_bridge_$(basename "$src" .cpp).o"
+        $MAC_CXX $MAC_FLAGS $MAC_INCLUDES -c "$src" -o "$obj" || fail "Failed to compile $src for JNI macOS"
+        $MAC_CXX $MAC_TARGET -shared -o "$OUT/libcalc-bridge-macos-arm64.dylib" \
+            "$obj" "${MAC_CORE_OBJS[@]}" \
+            -L"$LOCAL_PREFIX/macos/lib" -L"$MACOS_SDK/usr/lib" -lgmp -lmpfr -lobjc \
+            -lc++ \
+            || fail "Failed to link JNI bridge for macOS"
+    done
+    ok "  JNI bridge macOS: libcalc-bridge-macos-arm64.dylib"
+
+    # === Compile Java wrapper ===
     info "  Compiling Java wrapper classes..."
     local JAVA_SRC="$ROOT/java-wrapper/src/main/java"
     mkdir -p "$OUT/classes"
-    $JAVA_HOME/bin/javac -d "$OUT/classes" \
+    $JAVAC -d "$OUT/classes" \
         "$JAVA_SRC/com/calc/CalcEngine.java" \
         "$JAVA_SRC/com/calc/CalcResult.java" \
         "$JAVA_SRC/com/calc/Calculator.java" \
@@ -386,19 +416,22 @@ build_jar() {
         2>&1 || fail "Java compilation failed"
     ok "  Java classes compiled"
 
-    # Package JAR
-    info "  Packaging JAR..."
-    mkdir -p "$OUT/classes/native"
-    cp "$OUT/libcalc-bridge.so" "$OUT/classes/native/"
+    # === Package JAR ===
+    info "  Packaging JAR with all native libraries..."
+    mkdir -p "$OUT/classes/native/linux-x86_64" "$OUT/classes/native/windows-x86_64" "$OUT/classes/native/macos-arm64"
+    cp "$OUT/libcalc-bridge-linux-x86_64.so" "$OUT/classes/native/linux-x86_64/"
+    cp "$OUT/calc-bridge-windows-x86_64.dll" "$OUT/classes/native/windows-x86_64/"
+    cp "$OUT/libcalc-bridge-macos-arm64.dylib" "$OUT/classes/native/macos-arm64/"
+    
     cd "$OUT/classes"
-    $JAVA_HOME/bin/jar cf "$OUT/scientific-calculator.jar" \
+    $JAR_TOOL cf "$OUT/scientific-calculator.jar" \
         -C . . \
         || fail "JAR packaging failed"
-    ok "  JAR: $OUT/scientific-calculator.jar"
-
     cd "$ROOT"
+    
+    ok "  JAR: $OUT/scientific-calculator.jar"
     info "  JAR contents:"
-    $JAVA_HOME/bin/jar tf "$OUT/scientific-calculator.jar" | head -20
+    $JAR_TOOL tf "$OUT/scientific-calculator.jar" | grep -E "native|calc" | head -10
 }
 
 # ==================== Main ====================
@@ -428,13 +461,13 @@ info "========== Build Summary =========="
 for target in "${TARGETS[@]}"; do
     case "$target" in
         linux)   ls -lh "$BUILD_DIR/linux/scientific-calculator" 2>/dev/null ;;
-        windows) ls -lh "$BUILD_DIR/windows/scientific-calculator.exe" "$BUILD_DIR/windows/scientific-calculator-objs.a" 2>/dev/null ;;
-        macos)   ls -lh "$BUILD_DIR/macos/scientific-calculator" "$BUILD_DIR/macos/scientific-calculator-objs.a" 2>/dev/null ;;
+        windows) ls -lh "$BUILD_DIR/windows/scientific-calculator.exe" 2>/dev/null ;;
+        macos)   ls -lh "$BUILD_DIR/macos/scientific-calculator" 2>/dev/null ;;
         jar)     ls -lh "$BUILD_DIR/jar/scientific-calculator.jar" 2>/dev/null ;;
         all)
             ls -lh "$BUILD_DIR/linux/scientific-calculator" 2>/dev/null
-            ls -lh "$BUILD_DIR/windows/scientific-calculator.exe" "$BUILD_DIR/windows/scientific-calculator-objs.a" 2>/dev/null
-            ls -lh "$BUILD_DIR/macos/scientific-calculator" "$BUILD_DIR/macos/scientific-calculator-objs.a" 2>/dev/null
+            ls -lh "$BUILD_DIR/windows/scientific-calculator.exe" 2>/dev/null
+            ls -lh "$BUILD_DIR/macos/scientific-calculator" 2>/dev/null
             ls -lh "$BUILD_DIR/jar/scientific-calculator.jar" 2>/dev/null
             ;;
     esac

@@ -38,3 +38,19 @@ gradle/wrapper/gradle-wrapper.jar
 encoded.txt
 .local/
 build/
+
+# Third-party source archives
+third_party/gmp-*.tar.xz
+third_party/mpfr-*.tar.xz
+third_party/glfw-*.tar.gz
+
+# Third-party source directories (can be re-downloaded)
+third_party/gmp-6.*/
+third_party/mpfr-4.*/
+third_party/glfw-3.4/
+
+# Built dependencies
+.local/
+build/
+tool-results/
+upload/

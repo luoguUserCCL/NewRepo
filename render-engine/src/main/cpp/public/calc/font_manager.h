@@ -81,7 +81,7 @@ public:
         static constexpr uint32_t MOD = 0x1D45A;         ///< 𝑚 (italic m for mod)
         static constexpr uint32_t RADICAL = 0x221A;      ///< √
         static constexpr uint32_t PARTIAL_DIFF = 0x2202; ///< ∂
-        static constexpr uint32_t INFINITY = 0x221E;     ///< ∞
+        static constexpr uint32_t INFINITY_SYM = 0x221E;     ///< ∞
     };
 
 private:

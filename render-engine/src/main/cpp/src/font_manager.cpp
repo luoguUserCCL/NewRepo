@@ -141,7 +141,7 @@ std::string FontManager::codepointToGlyphName(uint32_t cp) {
         case MathCodepoints::GEQ: return "greaterequal";
         case MathCodepoints::NEQ: return "notequal";
         case MathCodepoints::IVERSON: return "doublestruck_I";
-        case MathCodepoints::INFINITY: return "infinity";
+        case MathCodepoints::INFINITY_SYM: return "infinity";
         case MathCodepoints::PARTIAL_DIFF: return "partialdiff";
         case MathCodepoints::MOD: return "italic_m";
         default: return "glyph_" + std::to_string(cp);
