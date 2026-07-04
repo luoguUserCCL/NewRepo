@@ -34,8 +34,14 @@ mkdir -p "$CACHE_ROOT"
 
 # Versions (overridable via env; gradle.properties mirrors these).
 : "${MINGW_VERSION:=12.0.0}"
-: "${ZIG_VERSION:=0.13.0}"
+: "${ZIG_VERSION:=0.17.0-dev.1158+1d1193aa7}"
 : "${GCC_MIN_VERSION:=11}"
+
+# Master switch: skip all network downloads. Useful when the build runs in a
+# constrained environment and we only want to validate already-installed
+# toolchains (e.g. MinGW from extracted debs). Cross-targets without a local
+# toolchain will gracefully degrade.
+: "${SCI_CALC_SKIP_DOWNLOAD:=0}"
 
 # Download mirrors (ordered; first reachable wins). niXman .7z first (reliable
 # host + extracted via py7zr fallback so no root needed). WinLibs/SourceForge
@@ -45,7 +51,10 @@ MINGW_URLS=(
   "https://github.com/niXman/mingw-builds-binaries/releases/download/12.2.0-rt_v10-rev2/x86_64-12.2.0-release-posix-seh-ucrt-rt_v10-rev2.7z"
   "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/13.2.0/threads-posix/seh/x86_64-13.2.0-release-posix-seh-ucrt-rt_v11-rev1.7z/download"
 )
+# Zig: the user-provided dev build URL (ziglang.org/builds/) is first because
+# dev builds are not on the GitHub releases page. Stable fallbacks follow.
 ZIG_URLS=(
+  "https://ziglang.org/builds/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
   "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
   "https://github.com/ziglang/zig/releases/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz"
 )
@@ -117,22 +126,56 @@ check_host_gcc() {
   return 0
 }
 
+# UCRT64 triplet used by Debian's mingw-w64 packaging (UCRT runtime variant).
+# Classic (msvcrt) triplet is x86_64-w64-mingw32- ; UCRT is x86_64-w64-mingw32ucrt- .
+MINGW_TRIPLET="${MINGW_TRIPLET:-x86_64-w64-mingw32ucrt}"
+
+# Candidate locations of an ALREADY-INSTALLED Linux-hosted MinGW-w64 (UCRT64):
+#   1. $SCI_CALC_MINGW_PREFIX  (explicit user override, e.g. ~/tools/mingw-ucrt64)
+#   2. $CACHE_ROOT/mingw       (our own previously-provisioned cache)
+#   3. /usr                     (apt-installed mingw-w64, needs root)
+# We prefer these over downloading, because the niXman/WinLibs tarballs are
+# Windows-hosted (PE) and cannot run on Linux.
+MINGW_PREFIX_CANDIDATES=(
+  "${SCI_CALC_MINGW_PREFIX:-}"
+  "${CACHE_ROOT}/mingw"
+  "/usr"
+)
+
 ensure_mingw() {
   local dst="$CACHE_ROOT/mingw"
   local marker="$dst/.version"
-  # Linux-hosted cross-compiler binary (ELF). niXman's mingw-builds-binaries
-  # ship Windows-hosted .exe binaries that CANNOT run on Linux, so we verify
-  # the host type after extraction and reject PE builds.
-  local bin="$dst/bin/x86_64-w64-mingw32-gcc"
+  local bin_name="${MINGW_TRIPLET}-gcc"
 
-  # fast path: cached + valid + Linux-hosted (ELF)
-  if [[ -f "$marker" && -x "$bin" ]] && [[ "$(cat "$marker")" == "$MINGW_VERSION" ]] \
-     && [[ "$(file -b "$bin" 2>/dev/null)" == ELF* ]]; then
-    log "mingw $MINGW_VERSION cached & valid (Linux-hosted ELF)"
+  # --- Phase 1: look for an ALREADY-INSTALLED Linux-hosted MinGW. ----------
+  for prefix in "${MINGW_PREFIX_CANDIDATES[@]}"; do
+    [[ -z "$prefix" ]] && continue
+    local cand="$prefix/bin/$bin_name"
+    [[ -x "$cand" ]] || cand="$prefix/usr/bin/$bin_name"   # deb layout has /usr/bin
+    if [[ -x "$cand" ]] && [[ "$(file -b "$cand" 2>/dev/null)" == ELF* ]]; then
+      # Record the discovered prefix so the rest of the build (Gradle toolChains
+      # path(), wrappers) can find it without re-searching.
+      mkdir -p "$CACHE_ROOT"
+      echo "$prefix" > "$CACHE_ROOT/mingw.prefix"
+      mkdir -p "$dst"
+      echo "installed" > "$marker"
+      log "mingw found ALREADY INSTALLED at $prefix (ELF, triplet=$MINGW_TRIPLET)"
+      log "  binary: $cand"
+      # sanity: version
+      "$cand" --version 2>/dev/null | head -1 | sed 's/^/  /' >&2 || true
+      return 0
+    fi
+  done
+
+  log "mingw not pre-installed -> provisioning (download)"
+
+  # --- Phase 2: download + extract (fallback). -----------------------------
+  if [[ "$SCI_CALC_SKIP_DOWNLOAD" == "1" ]]; then
+    warn "SCI_CALC_SKIP_DOWNLOAD=1 -> skipping mingw download."
+    warn "  Set SCI_CALC_MINGW_PREFIX=/path/to/mingw or install via apt."
+    warn "  Windows cross-build will fall back to Zig (if available)."
     return 0
   fi
-  log "mingw missing/stale/wrong-host -> provisioning"
-
   rm -rf "$dst"; mkdir -p "$dst"
   local arc; arc="$CACHE_ROOT/mingw.7z"
   local ok=0
@@ -142,7 +185,10 @@ ensure_mingw() {
   if (( ! ok )); then
     rm -f "$arc"; rmdir "$dst" 2>/dev/null || true
     warn "mingw download failed (offline / bad mirror)."
-    warn "  Windows cross-build will fall back to Zig (zig cc -target x86_64-windows-gnu)."
+    warn "  Recommended on Debian/Ubuntu (needs root):"
+    warn "    apt install mingw-w64 g++-mingw-w64-ucrt64 binutils-mingw-w64-ucrt64"
+    warn "  Or set SCI_CALC_MINGW_PREFIX=/path/to/extracted/debs"
+    warn "  Windows cross-build will otherwise fall back to Zig."
     warn "  Linux native build is unaffected and will proceed."
     return 0
   fi
@@ -152,23 +198,23 @@ ensure_mingw() {
     return 0
   fi
   rm -f "$arc"
-  # flatten nested dir if present (niXman extracts to mingw64/).
+  # flatten nested dir if present.
   local nested; nested=$(find "$dst" -maxdepth 1 -mindepth 1 -type d | head -1)
   if [[ -n "$nested" && -d "$nested/bin" ]]; then
     mv "$nested"/* "$dst"/ 2>/dev/null || true
     rmdir "$nested" 2>/dev/null || true
   fi
 
-  # HOST-TYPE GUARD: reject Windows-hosted (PE) builds — they can't run on
-  # Linux. The Zig fallback (ensure_zig_wrappers) covers Windows cross.
-  if [[ -x "$bin" ]] && [[ "$(file -b "$bin" 2>/dev/null)" != ELF* ]]; then
+  # HOST-TYPE GUARD: reject Windows-hosted (PE) builds.
+  local dlbin="$dst/bin/$bin_name"
+  if [[ -x "$dlbin" ]] && [[ "$(file -b "$dlbin" 2>/dev/null)" != ELF* ]]; then
     warn "downloaded mingw is Windows-hosted (PE), not Linux-hosted (ELF)."
-    warn "  A Linux-hosted MinGW-w64 needs 'apt install mingw-w64' (root) or a"
-    warn "  custom ELF tarball. Falling back to Zig for Windows cross."
+    warn "  Install via apt (root) or set SCI_CALC_MINGW_PREFIX. Falling back to Zig."
     rm -rf "$dst"
     return 0
   fi
 
+  echo "$dst" > "$CACHE_ROOT/mingw.prefix"
   echo "$MINGW_VERSION" > "$marker"
   log "mingw $MINGW_VERSION installed at $dst"
 }
@@ -184,6 +230,11 @@ ensure_zig() {
   fi
   log "zig missing/stale -> provisioning"
 
+  if [[ "$SCI_CALC_SKIP_DOWNLOAD" == "1" ]]; then
+    warn "SCI_CALC_SKIP_DOWNLOAD=1 -> skipping zig download."
+    warn "  macOS cross-build will be unavailable. Linux native build is unaffected."
+    return 0
+  fi
   rm -rf "$dst"; mkdir -p "$dst"
   local arc; arc="$CACHE_ROOT/zig.tar.xz"
   local ok=0
@@ -256,33 +307,56 @@ exec "$(dirname "$0")/../zig/zig" c++ -target x86_64-macos-gnu "$@"
 EOF
   chmod +x "$wdir/clang" "$wdir/clang++"
 
-  # Windows cross fallback: if no Linux-hosted MinGW is available (the common
-  # case without root), expose the canonical MinGW binary names as Zig
-  # wrappers targeting x86_64-windows-gnu. The spec prefers real MinGW-w64,
-  # but this keeps Windows cross-builds working in a bare environment.
+  # Windows cross fallback: if no Linux-hosted MinGW is available, expose the
+  # canonical MinGW binary names as Zig wrappers targeting x86_64-windows-gnu.
+  # We check the recorded mingw.prefix file (written by ensure_mingw) AND the
+  # classic/ucrt triplet binaries on PATH.
+  local real_mingw=0
+  local mpf="$CACHE_ROOT/mingw.prefix"
+  local mprefix=""
+  [[ -r "$mpf" ]] && mprefix=$(cat "$mpf" 2>/dev/null)
+  for t in "$MINGW_TRIPLET" "x86_64-w64-mingw32"; do
+    local p
+    for p in "$mprefix/bin/$t-gcc" "$mprefix/usr/bin/$t-gcc" \
+             "$(command -v $t-gcc 2>/dev/null)"; do
+      if [[ -x "$p" ]] && [[ "$(file -b "$p" 2>/dev/null)" == ELF* ]]; then
+        real_mingw=1; break 2
+      fi
+    done
+  done
+
+  # Always (re)generate the fallback wrappers, then remove them if a real
+  # MinGW exists — cleaner than conditional generation.
   make_wrapper x86_64-w64-mingw32-gcc   cc  x86_64-windows-gnu
   make_wrapper x86_64-w64-mingw32-g++   c++ x86_64-windows-gnu
   make_wrapper x86_64-w64-mingw32-cc    cc  x86_64-windows-gnu
   make_wrapper x86_64-w64-mingw32-c++   c++ x86_64-windows-gnu
-  # Only install the mingw wrappers if a REAL Linux-hosted MinGW is NOT
-  # present (don't shadow a genuine apt-installed mingw-w64).
-  if [[ ! -x "$CACHE_ROOT/mingw/bin/x86_64-w64-mingw32-gcc" ]] \
-     || [[ "$(file -b "$CACHE_ROOT/mingw/bin/x86_64-w64-mingw32-gcc" 2>/dev/null)" != ELF* ]]; then
-    chmod +x "$wdir"/x86_64-w64-mingw32-{gcc,g++,cc,c++}
-    log "zig->mingw fallback wrappers installed (no Linux-hosted MinGW detected)"
-  else
+  if (( real_mingw )); then
     rm -f "$wdir"/x86_64-w64-mingw32-{gcc,g++,cc,c++}
     log "real Linux-hosted MinGW detected; zig->mingw fallback wrappers skipped"
+  else
+    chmod +x "$wdir"/x86_64-w64-mingw32-{gcc,g++,cc,c++}
+    log "zig->mingw fallback wrappers installed (no Linux-hosted MinGW detected)"
   fi
 
   log "zig clang wrappers installed at $wdir"
 }
 
 print_env() {
+  # Resolve the actual MinGW prefix (installed or cached) for the consumer.
+  local mprefix=""
+  [[ -r "$CACHE_ROOT/mingw.prefix" ]] && mprefix=$(cat "$CACHE_ROOT/mingw.prefix" 2>/dev/null)
+  local mbind="$CACHE_ROOT/mingw/bin"
+  if [[ -n "$mprefix" ]]; then
+    [[ -d "$mprefix/usr/bin" ]] && mbind="$mprefix/usr/bin"
+    [[ -d "$mprefix/bin"     ]] && mbind="$mprefix/bin"
+  fi
   cat <<EOF
 export SCI_CALC_TC_CACHE="$CACHE_ROOT"
-export PATH="$CACHE_ROOT/mingw/bin:$CACHE_ROOT/zig:$CACHE_ROOT/wrappers:\$PATH"
-export MINGW_PREFIX="x86_64-w64-mingw32"
+export SCI_CALC_MINGW_PREFIX="${mprefix:-}"
+export PATH="$mbind:$CACHE_ROOT/zig:$CACHE_ROOT/wrappers:\$PATH"
+export MINGW_TRIPLET="$MINGW_TRIPLET"
+export MINGW_PREFIX="$MINGW_TRIPLET"
 export ZIG_CC="$CACHE_ROOT/zig/zig cc"
 export ZIG_CXX="$CACHE_ROOT/zig/zig c++"
 EOF
@@ -297,6 +371,16 @@ case "$MODE" in
     ensure_zig_wrappers
     log "ALL TOOLCHAINS READY"
     ;;
+  --quick)
+    # Same as --check but never hit the network. Used by Gradle's
+    # toolchainCheck task so a build never stalls on a slow mirror.
+    export SCI_CALC_SKIP_DOWNLOAD=1
+    check_host_gcc || warn "host gcc below minimum (Linux native may fail)"
+    ensure_mingw
+    ensure_zig
+    ensure_zig_wrappers
+    log "TOOLCHAINS CHECKED (quick mode, no downloads)"
+    ;;
   --env)
     print_env
     ;;
@@ -304,6 +388,6 @@ case "$MODE" in
     print_env
     ;;
   *)
-    die "usage: $0 [--check|--env]"
+    die "usage: $0 [--check|--quick|--env]"
     ;;
 esac

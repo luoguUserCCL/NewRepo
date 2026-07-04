@@ -64,9 +64,17 @@ class CrossCompilePlugin implements Plugin<Project> {
                 tccTask.commandLine 'bash', '-c',
                     "echo '[tc][ERR ] tools/toolchain-ensure.sh missing.' >&2; exit 1"
             } else {
-                tccTask.commandLine 'bash', ensureScript.absolutePath, '--check'
+                // --quick: validate + use installed toolchains WITHOUT hitting
+                // the network. Downloads are a separate manual step
+                // (./tools/toolchain-ensure.sh --check) so a Gradle build never
+                // stalls on a slow mirror.
+                tccTask.commandLine 'bash', ensureScript.absolutePath, '--quick'
             }
             tccTask.environment 'SCI_CALC_TC_CACHE', tcCache.absolutePath
+            // Pass through an externally-set MinGW prefix (e.g. when debs were
+            // extracted to ~/tools/mingw-ucrt64). The env var is optional.
+            def extMingw = System.env.SCI_CALC_MINGW_PREFIX
+            if (extMingw) tccTask.environment 'SCI_CALC_MINGW_PREFIX', extMingw
             tccTask.outputs.upToDateWhen { false }
         }
 
@@ -76,14 +84,28 @@ class CrossCompilePlugin implements Plugin<Project> {
         project.tasks.withType(LinkSharedLibrary).configureEach { it.dependsOn tccTask }
 
         // --- 3. NEW Toolchain API: project-scope `toolChains {}` extension.
-        //        Add cache dirs to the toolchain search path so auto-detection
-        //        finds MinGW (windows) and the Zig-as-clang wrappers (macOS).
+        //        Add toolchain binary dirs to the search path() so Gradle's
+        //        auto-detection finds:
+        //          - MinGW-w64 UCRT64 (windows cross) — read from the
+        //            mingw.prefix file written by tools/toolchain-ensure.sh,
+        //            which records the discovered prefix (installed deb,
+        //            apt /usr, or our cache). Falls back to the cache dir.
+        //          - Zig-as-clang wrappers (macOS cross).
         //        Non-existent dirs are skipped to avoid confusing Gradle on a
         //        fresh checkout before toolchainCheck has run. ---
+        File mingwPrefixFile = new File(tcCache, 'mingw.prefix')
+        String mingwPrefixStr = mingwPrefixFile.exists()
+            ? mingwPrefixFile.text.trim() : ''
+        File mingwUsrBin = mingwPrefixStr ? new File(mingwPrefixStr, 'usr/bin') : null
+        File mingwBin2   = mingwPrefixStr ? new File(mingwPrefixStr, 'bin')     : null
+
         project.plugins.withId('native-component') {
             project.toolChains {
                 withType(Gcc).configureEach { gcc ->
-                    if (mingwBin.exists())  gcc.path mingwBin
+                    // Prefer the recorded prefix's bin dirs; fall back to cache.
+                    if (mingwUsrBin && mingwUsrBin.exists()) gcc.path mingwUsrBin
+                    if (mingwBin2   && mingwBin2.exists())   gcc.path mingwBin2
+                    if (mingwBin.exists())                   gcc.path mingwBin
                 }
                 withType(Clang).configureEach { clang ->
                     if (wrappersDir.exists()) clang.path wrappersDir
