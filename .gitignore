@@ -1,5 +1,13 @@
-# Build artifacts
-build/
+# Build artifacts.
+# Anchored per-project so we never match a Java/Groovy package dir named
+# `build` (e.g. com/calc/build/). Add new subprojects here as they appear.
+/build/
+/buildSrc/build/
+/calc-core/build/
+/render-engine/build/
+/jni-bridge/build/
+/native-app/build/
+/java-wrapper/build/
 *.o
 *.so
 *.dll
@@ -30,14 +38,18 @@ Thumbs.db
 
 # Gradle
 .gradle/
-gradle/wrapper/gradle-wrapper.jar
+# NOTE: gradle/wrapper/gradle-wrapper.jar IS committed — it is required for
+# ./gradlew to work on a fresh checkout. Do NOT ignore it.
 
-# Secrets
+# Fault-tolerant toolchain cache (re-provisioned by tools/toolchain-ensure.sh)
+.scicalc-cache/
+
+# Secrets — NEVER commit credentials
+.gh_pat
 *.pat
 .pat_token
 encoded.txt
 .local/
-build/
 
 # Third-party source archives
 third_party/gmp-*.tar.xz
@@ -51,6 +63,8 @@ third_party/glfw-3.4/
 
 # Built dependencies
 .local/
-build/
 tool-results/
 upload/
+
+# Stray apt downloads
+*.deb

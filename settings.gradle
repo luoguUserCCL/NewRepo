@@ -1,13 +1,34 @@
-rootProject.name = 'scientific-calculator'
+// ============================================================================
+//  settings.gradle  --  scientific-calculator  (Groovy DSL)
+//
+//  NEW Gradle Toolchain API (JVM side): the `foojay-resolver-convention`
+//  plugin auto-registers the Foojay Disco repository as a JVM toolchain
+//  source, so any `java { toolchain { languageVersion = ... } }` block in
+//  the build can request a JDK and Gradle will download it on demand.
+//
+//  This is the explicit, recommended form of the new Toolchain API and
+//  replaces the empty `toolchainManagement { jvm {} }` stub that was here
+//  before (which declared the block but wired no resolver, so auto-
+//  provisioning silently did nothing).
+//
+//  Native (C/C++) toolchain config lives in build.gradle and in the
+//  buildSrc CrossCompilePlugin: the new component-based native plugins
+//  register the `toolChains` extension at PROJECT scope (NOT in settings,
+//  NOT inside the deprecated `model {}`).
+// ============================================================================
 
-// Gradle new ToolChain API — toolchainManagement block
-// This replaces the legacy model { toolChains {} } DSL
-toolchainManagement {
-    jvm {
-        // JVM toolchain auto-detection / auto-provisioning
-        // Gradle 7.6+ will auto-provision JDKs if needed
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
     }
 }
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
+rootProject.name = 'scientific-calculator'
 
 // Include all subprojects
 include 'calc-core'
