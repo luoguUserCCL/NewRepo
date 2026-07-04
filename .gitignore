@@ -15,6 +15,10 @@ cmake-build-*/
 # Third-party (downloaded by setup.sh)
 third_party/imgui/
 
+# Font build artifacts
+fonts/subset_chars.txt
+fonts/NotoSansSC-VF.ttf
+
 # IDE
 .idea/
 .vscode/

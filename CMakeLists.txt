@@ -71,10 +71,12 @@ if(BUILD_NATIVE_APP)
     add_executable(calc
         native-app/src/main/cpp/main.cpp
         native-app/src/main/cpp/i18n.cpp
+        native-app/src/main/cpp/embedded/fonts.cpp
         ${IMGUI_SOURCES}
     )
     target_include_directories(calc PRIVATE
         native-app/src/main/cpp
+        native-app/src/main/cpp/embedded
         ${IMGUI_DIR}
         ${IMGUI_DIR}/backends
     )
