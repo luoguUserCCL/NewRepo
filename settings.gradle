@@ -1,5 +1,15 @@
 rootProject.name = 'scientific-calculator'
 
+// Gradle new ToolChain API — toolchainManagement block
+// This replaces the legacy model { toolChains {} } DSL
+toolchainManagement {
+    jvm {
+        // JVM toolchain auto-detection / auto-provisioning
+        // Gradle 7.6+ will auto-provision JDKs if needed
+    }
+}
+
+// Include all subprojects
 include 'calc-core'
 include 'render-engine'
 include 'jni-bridge'

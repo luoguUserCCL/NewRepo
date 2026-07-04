@@ -4,8 +4,15 @@ plugins {
 
 repositories {
     mavenCentral()
+    gradlePluginPortal()
 }
 
 dependencies {
     implementation gradleApi()
+    implementation localGroovy()
 }
+
+// The plugins we produce:
+// - com.calc.build.mingw-toolchain  → MingwToolChainPlugin
+// - com.calc.build.zig-toolchain    → ZigToolChainPlugin
+// - com.calc.build.cross-compile    → CrossCompilePlugin

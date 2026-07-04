@@ -21,8 +21,10 @@ library {
     }
 }
 
+// Apply custom toolchain management
 apply plugin: com.calc.build.CrossCompilePlugin
 
+// ==================== Compiler Configuration ====================
 tasks.withType(CppCompile).configureEach {
     compilerArgs.addAll([
         '-std=c++17',

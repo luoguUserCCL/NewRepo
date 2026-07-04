@@ -14,7 +14,7 @@ dependencies {
     // No external Java dependencies
 }
 
-// Task to copy native libraries into JAR resources
+// Task to copy native libraries from jni-bridge build output into JAR resources
 tasks.register('copyNativeLibs', Copy) {
     def nativeBuildDir = project(':jni-bridge').layout.buildDirectory.dir('libs')
 

@@ -15,11 +15,16 @@ application {
     }
 }
 
+// Apply custom toolchain management (Mingw + Zig + platform-specific flags)
 apply plugin: com.calc.build.CrossCompilePlugin
 
-// Platform-specific source sets
-def platformDir = 'src/main/cpp/platform'
+// ==================== Dear ImGui Source Files ====================
+// Dear ImGui is compiled as part of the native-app executable
+// (header-only library, source files included directly)
 
+def imguiDir = "${project.rootProject.projectDir}/third_party/imgui"
+
+// Include ImGui sources in compilation
 tasks.withType(CppCompile).configureEach {
     compilerArgs.addAll([
         '-std=c++17',
@@ -32,30 +37,41 @@ tasks.withType(CppCompile).configureEach {
     def gmpInclude = System.getenv('GMP_INCLUDE') ?: '/usr/include'
     def mpfrInclude = System.getenv('MPFR_INCLUDE') ?: '/usr/include'
     compilerArgs.addAll(["-I${gmpInclude}", "-I${mpfrInclude}"])
-}
 
-tasks.withType(LinkExecutable).configureEach {
-    // Platform-specific linker settings
-    linkerArgs.addAll([
-        '-lgmp',
-        '-lmpfr',
-        '-lGL',
-        '-ldl'
+    // Dear ImGui include paths
+    compilerArgs.addAll([
+        "-I${imguiDir}",
+        "-I${imguiDir}/backends"
     ])
 
-    // GLFW linking
+    // Embedded font include
+    compilerArgs.addAll(['-DEMBED_FONTS'])
+}
+
+// ==================== Linker Configuration ====================
+tasks.withType(LinkExecutable).configureEach {
+    // Core math libraries
+    linkerArgs.addAll([
+        '-lgmp',
+        '-lmpfr'
+    ])
+
+    // OpenGL
+    linkerArgs.add('-lGL')
+
+    // GLFW
     linkerArgs.add('-lglfw')
+
+    // Dynamic linking
+    linkerArgs.add('-ldl')
 }
 
-// Linux-specific compile task configuration
-tasks.matching { it.name.contains('linux') && it instanceof CppCompile }.configureEach {
-    compilerArgs.addAll(['-DPLATFORM_LINUX'])
-}
+// ==================== Font Embedding ====================
+// Latin Modern Math is compiled into the binary as constexpr byte arrays
+// (see embedded/font_latinmodern_math.h)
+// CJK fonts (Noto Sans SC) are loaded from system font paths at runtime
+// (see embedded/fonts.cpp — auto-detects system font directories)
 
-tasks.matching { it.name.contains('windows') && it instanceof CppCompile }.configureEach {
-    compilerArgs.addAll(['-DPLATFORM_WINDOWS'])
-}
-
-tasks.matching { it.name.contains('macos') && it instanceof CppCompile }.configureEach {
-    compilerArgs.addAll(['-DPLATFORM_MACOS'])
-}
+// ==================== Install ====================
+// Gradle's cpp-application plugin automatically creates install tasks
+// ./gradlew :native-app:installDist   → installs to build/install/native-app/

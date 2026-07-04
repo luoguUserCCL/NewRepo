@@ -3,7 +3,7 @@ plugins {
 }
 
 library {
-    // Core engine is a static library - linked into final executables
+    // Core engine is a static library — linked into final executables and JNI bridge
     linkage = [Linkage.STATIC]
 
     targetMachines = [
@@ -12,16 +12,16 @@ library {
         machines.macOS.x86_64
     ]
 
-    // Public API headers
+    // Public API headers — other subprojects depend on these
     publicHeaders {
         from('src/main/cpp/public')
     }
 }
 
-// Apply custom toolchain management
+// Apply custom toolchain management (Mingw + Zig cross-compile)
 apply plugin: com.calc.build.CrossCompilePlugin
 
-// Compiler settings for all platforms
+// ==================== Compiler Configuration ====================
 tasks.withType(CppCompile).configureEach {
     compilerArgs.addAll([
         '-std=c++17',
@@ -32,16 +32,25 @@ tasks.withType(CppCompile).configureEach {
         '-fPIC'
     ])
 
-    // Define GMP/MPFR include paths
+    // GMP/MPFR include paths (auto-detected from environment or system default)
     def gmpInclude = System.getenv('GMP_INCLUDE') ?: '/usr/include'
     def mpfrInclude = System.getenv('MPFR_INCLUDE') ?: '/usr/include'
     compilerArgs.addAll(["-I${gmpInclude}", "-I${mpfrInclude}"])
+
+    // Compiler definitions
+    compilerArgs.addAll([
+        '-DGMP_HEADER_INCLUDE',
+        '-DMPFR_HEADER_INCLUDE'
+    ])
 }
 
-// Linker settings
+// ==================== Linker Configuration ====================
 tasks.withType(LinkSharedLibrary).configureEach {
     linkerArgs.addAll([
         '-lgmp',
         '-lmpfr'
     ])
 }
+
+// For static library linking, we don't need linker args here —
+// the final executable links GMP/MPFR when consuming calc-core

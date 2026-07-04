@@ -1,8 +1,18 @@
 project.version = '1.0.0'
 project.group = 'com.calc'
 
+// ==================== Native ToolChain Configuration ====================
+// New ToolChain API: configure toolchains centrally here
+// This replaces the legacy model { toolChains { gcc {} } } block
+// ToolChains are auto-discovered; cross-compilation is handled via
+// buildSrc plugins (MingwToolChainPlugin, ZigToolChainPlugin)
+
 subprojects {
     repositories {
         mavenCentral()
     }
 }
+
+// Register native toolchains globally via the new API
+// Each C++ subproject applies CrossCompilePlugin which in turn
+// applies MingwToolChainPlugin and ZigToolChainPlugin
