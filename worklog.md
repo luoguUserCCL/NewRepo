@@ -132,3 +132,58 @@ Stage Summary:
 - macOS: compile-only (GMP/MPFR macOS libs needed for link — future work)
 - Commit: 0f7703a pushed to origin/main
 - build-verify.sh committed for reproducible verification
+
+---
+Task ID: 5
+Agent: macOS build completion
+Task: Complete macOS build and upload to release
+
+Work Log:
+- Read prior worklog for context (Tasks 1-4). Task 4 had macOS compile-only verified; GMP/MPFR macOS libs were the remaining blocker.
+- Checked GMP configure status: prior `mac-gmp-configure2.log` was incomplete (no CONFIGURE_DONE), no configure process running, macdeps/lib/ did not exist. The previous run had been killed mid-check (around the C++ preprocessor / "checking compiler" step) — config.log showed it never wrote config.status.
+- Root cause: GMP's `--disable-assembly` does NOT skip the assembler-probing tests; `/usr/bin/nm -B` (Linux binutils) cannot read Mach-O object files produced by `zig cc -target x86_64-macos.11.0`, so tests like "how to define a 32-bit word" failed with `file format not recognized` → configure errored with "cannot determine how to define a 32-bit word".
+- Fix: wrote a cache-file `/home/z/sci-calc/.scicalc-cache/mac-gmp-cache.cfg` pre-populating every `gmp_cv_asm_*` / `gmp_cv_c_*` / `gmp_cv_func_*` / `gmp_cv_prog_*` variable used by GMP's configure (including the misnamed `gmp_cv_asm_w32` for the 32-bit-word test, which is NOT `gmp_cv_asm_w`). Also added `--disable-cxx` (libgmpxx not needed) and `--cache-file=…`.
+- GMP configure succeeded (exit 0). `make -j2` → `libgmp.a` (4.0 MB, 105 mpn objects). `make install` to `macdeps/` (libgmp.a + gmp.h).
+- MPFR configure for x86_64-apple-darwin succeeded (linked against macdeps libgmp.a). `make -j2` → `libmpfr.a` (2.83 MB). `make install` to `macdeps/` (libmpfr.a + mpfr.h + mpf2mpfr.h).
+- Built macOS CLI executable: `zig c++ -target x86_64-macos.11.0 -std=c++17 -O2 … cli/main.cpp calc-core/.../*.cpp -lmpfr -lgmp`. Output: `dist/sci-calc-macos-x86_64` (1,547,983 bytes). `file` confirms: Mach-O 64-bit x86_64 executable, PIE, NOUNDEFS, DYLDLINK.
+- Prepared JDK darwin include dir: copied `linux/jni_md.h` to `jdk/include/darwin/jni_md.h` (the file is platform-neutral: JNIEXPORT uses GCC visibility attr, jint/jlong/jbyte typedefs work on macOS x86_64). Created empty `jni-bridge/src/main/cpp/public/` placeholder for the include path.
+- Built macOS JNI shared library: `zig c++ -target x86_64-macos.11.0 -std=c++17 -O2 -shared calc_jni.cpp calc-core/.../*.cpp -lmpfr -lgmp`. Output: `build-jni/macos/libscicalc-native.dylib` (1,578,168 bytes). `file` confirms: Mach-O 64-bit x86_64 dynamically linked shared library.
+- Rebuilt JAR: copied .dylib into `build-jar/classes/jni/macos/x86_64/libscicalc-native.dylib`, ran `jar cfe dist/sci-calc.jar com.calc.Calculator -C classes .`. JAR now contains native libs for all 3 platforms (linux/x86_64 .so, windows/x86_64 .dll, macos/x86_64 .dylib). Size: 2,197,537 bytes (was 1,666,504).
+- Uploaded macOS executable to release 349097712 (new asset ID 466923428, 1,547,983 bytes, state=uploaded).
+- Deleted old sci-calc.jar asset (ID 466916308, HTTP 204) and uploaded the rebuilt JAR (new asset ID 466923517, 2,197,537 bytes, state=uploaded).
+- Final release now has 5 assets: linux-x86_64, macos-x86_64, windows-x86_64.exe, windows-x86_64-console.exe, sci-calc.jar (all 3-platform native).
+
+Stage Summary:
+- macOS x86_64 build is COMPLETE and uploaded.
+- GMP 6.3.0 + MPFR 4.2.2 cross-compiled via Zig for x86_64-macos.11.0, installed to `.scicalc-cache/macdeps/{lib,include}`.
+- CLI executable `sci-calc-macos-x86_64` (Mach-O 64-bit x86_64, 1.55 MB) — uploaded as release asset 466923428.
+- JNI shared lib `libscicalc-native.dylib` (Mach-O 64-bit x86_64 shared library, 1.58 MB) — embedded in JAR at `jni/macos/x86_64/`.
+- JAR `sci-calc.jar` (2.20 MB) rebuilt with all 3 platforms' native libs — uploaded as release asset 466923517 (old asset deleted).
+- All 5 release assets verified uploaded: linux-x86_64, macos-x86_64, windows-x86_64.exe, windows-x86_64-console.exe, sci-calc.jar.
+- Three-platform release v0.1.0 (release ID 349097712) is now complete.
+- Key gotcha for future reference: GMP cross-configure cannot use the build system's `nm` for Mach-O objects — must pre-populate ALL `gmp_cv_asm_*` cache variables (especially `gmp_cv_asm_w32`, NOT `gmp_cv_asm_w`) via `--cache-file`. `--disable-assembly` does not skip these probes.
+
+---
+Task ID: 6
+Agent: macOS GUI build
+Task: Build macOS GUI executable with Dear ImGui + GLFW + OpenGL
+
+Work Log:
+- Read prior worklog for context. Tasks 1-5 completed: engine code inventory, bug fixes, math output mode, 3-platform CLI/JNI build. Task 4 noted "macOS: compile-only (GMP/MPFR macOS libs needed for link — future work)"; Task 5 added GMP/MPFR macOS libs to .scicalc-cache/macdeps/ and built the macOS CLI executable. Linux and Windows GUI builds existed in dist/; macOS GUI was the remaining gap.
+- Existing build-gui.sh had a macOS section that tried `cmake` (with Zig as C compiler) then fell back to manual GLFW compile, but neither had been exercised yet. .scicalc-cache/macglfw/ did not exist.
+- **Step 1 — Get macOS SDK**: Zig 0.17.0-dev.1158 ships only `libSystem.tbd` and basic `any-darwin-any` libc headers (no Carbon/Cocoa/AppKit/OpenGL framework headers and no framework TBDs). Downloaded MacOSX10.15.sdk.tar.xz (40 MB) AND MacOSX11.3.sdk.tar.xz (51 MB) from github.com/phracker/MacOSX-SDKs (the 11.3 release), extracted both into .scicalc-cache/macsdk/. The 10.15 SDK uses tapi-tbd v3 format; 11.3 uses v4 format.
+- **Step 2 — Build GLFW 3.4 for macOS**: Downloaded glfw-3.4.zip from GitHub releases into .scicalc-cache/src/glfw-3.4/. Compiled 21 GLFW source files (7 core + 2 EGL/Osmesa + 4 null + 3 POSIX/Cocoa-time + 5 Cocoa .m) with `zig cc -target x86_64-macos.11.0 -D_GLFW_COCOA -isysroot <10.15 SDK> -F <frameworks>`. Archived into .scicalc-cache/macglfw/lib/libglfw3.a (1,024,672 bytes). Also copied glfw3.h and glfw3native.h into .scicalc-cache/macglfw/include/GLFW/ for downstream use.
+- **Step 3 — Discover Zig ld reexported-libraries segfault**: First link attempt failed silently (0-byte output, exit 0). Re-running with `-v` revealed the actual linker invocation `zig ld -dynamic -platform_version macos 11.0.0 26.5 ... -framework Cocoa -framework OpenGL -lSystem ...` followed by `exit=139` (SIGSEGV). Root cause: Zig's bundled LLD segfaults when parsing TAPI TBD files whose `reexported-libraries` (v4) or `re-exports` (v3) section points at dylibs/frameworks that themselves need to be resolved from the SDK. The OpenGL.tbd reexports libGL.dylib + libGLU.dylib; AppKit.tbd reexports ApplicationServices + Foundation + UIFoundation; Carbon.tbd reexports HIToolbox + CommonPanels + ...; CoreServices.tbd reexports CarbonCore; etc. Zig reports success but writes an empty file.
+- **Step 4 — Workaround**: Wrote a Python script to strip the `reexported-libraries` (v4) section from every framework TBD we need. Generated cleaned TBDs in .scicalc-cache/macgl/: libCocoa.tbd, libAppKit.tbd, libFoundation.tbd, libCoreFoundation.tbd, libCoreGraphics.tbd, libApplicationServices.tbd, libIOKit.tbd, libCoreVideo.tbd, libCarbon.tbd, libCoreServices.tbd, libHIToolbox.tbd, libOpenGL.tbd, libGL.tbd, libGLU.tbd, libobjc.tbd. Used 11.3 SDK TBDs (v4 format, cleanly strippable) for linking; used 10.15 SDK headers (-isysroot) for compilation (the 11.3 SDK headers trigger additional C++17 enum-base errors in CoreFoundation that 10.15 does not).
+- **Step 5 — C++ libc++ header conflict**: The naive `-isysroot $SDK -I $SDK/usr/include` puts macOS SDK's `string.h`/`stddef.h`/etc. ahead of Zig's libc++ wrappers, causing libc++ to error out (`<cstring> tried including <string.h> but didn't find libc++'s <string.h> header`). Fix: drop `-I $SDK/usr/include` and rely on `-isysroot` alone (zig's libc++ wrappers come first in the search order; the SDK's /usr/include is added by -isysroot at lower priority). Also added `-Wno-elaborated-enum-base` for CoreFoundation's forward enum declarations and `-Wno-macro-redefined` for `TARGET_OS_*` built-in vs SDK conflicts.
+- **Step 6 — Link**: Final link used `-lCocoa -lAppKit -lFoundation -lCoreFoundation -lCoreGraphics -lApplicationServices -lIOKit -lCoreVideo -lCarbon -lCoreServices -lOpenGL -lGL -lGLU -lobjc` (all from .scicalc-cache/macgl/) plus `-lglfw3 -lmpfr -lgmp` (from macglfw/ and macdeps/). After adding `-lCoreServices` (for `_UCKeyTranslate` referenced by GLFW's `cocoa_window.o`), the link succeeded with zero undefined symbols.
+- **Step 7 — Verify**: `file dist/sci-calc-gui-macos-x86_64` → `Mach-O 64-bit x86_64 executable, flags:<NOUNDEFS|DYLDLINK|TWOLEVEL|WEAK_DEFINES|BINDS_TO_WEAK|NO_REEXPORTED_DYLIBS|PIE|HAS_TLV_DESCRIPTORS>`. Size: 3,053,816 bytes (≈3.05 MB; cf. Linux GUI 2.35 MB, Windows GUI 5.50 MB). NOUNDEFS confirms all symbols resolved.
+- **Step 8 — Upload**: `curl -X POST ... /assets?name=sci-calc-gui-macos-x86_64` to release 349097712. Response: asset ID 466955481, size 3053816, state=uploaded, sha256=56d8833f6df1663e64e9ed71b6b63b00ee1d372687d1c541442f447755418c7c.
+
+Stage Summary:
+- macOS x86_64 GUI build is COMPLETE and uploaded. `dist/sci-calc-gui-macos-x86_64` (3.05 MB, Mach-O 64-bit x86_64, PIE) — release asset 466955481.
+- GLFW 3.4 static lib (libglfw3.a, 1.0 MB) built for x86_64-macos.11.0 with Cocoa backend; archived at .scicalc-cache/macglfw/lib/.
+- **Key gotcha for future cross-compile work**: Zig 0.17.0-dev.1158's LLD silently segfaults (writes empty file, reports exit 0) when linking against macOS frameworks whose TAPI TBD files have a non-empty `reexported-libraries`/`re-exports` section. Workaround: pre-strip that section from each framework TBD and link via `-l<Framework>` from a local dir, instead of `-framework <Framework>`. Always run with `-v` to confirm the linker actually ran.
+- **Second gotcha**: When compiling C++ against a macOS SDK with Zig, do NOT pass `-I $SDK/usr/include` — it shadows Zig's libc++ wrapper headers (`<string.h>` etc.) and breaks libc++. Use `-isysroot $SDK` alone; the SDK's /usr/include is added at lower priority automatically.
+- **Third gotcha**: macOS framework headers use `enum Foo : type Foo;` forward declarations that C++17 rejects by default. Add `-Wno-elaborated-enum-base` to suppress.
+- macOS GUI release asset list now complete: linux-x86_64, macos-x86_64, windows-x86_64.exe, windows-x86_64-console.exe, sci-calc.jar (CLI/JNI for all 3 platforms). All three platforms now have BOTH CLI and GUI native builds available on release v0.1.0 (id 349097712).

@@ -82,7 +82,7 @@ public:
             ImGui::TextDisabled("%s", I18n::get("history.empty").c_str());
         } else {
             // Show history in reverse order (newest first)
-            ImGui::BeginChild("History", ImVec2(0, 0), ImGuiChildFlags_Borders);
+            ImGui::BeginChild("History", ImVec2(0, 0), ImGuiChildFlags_Border);
             for (int i = static_cast<int>(state.history.size()) - 1; i >= 0; i--) {
                 const auto& entry = state.history[i];
                 ImGui::PushID(i);
@@ -132,7 +132,7 @@ private:
                     float frameHeight = size.y + 16.0f;
                     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.15f, 0.15f, 0.18f, 1.0f));
                     ImGui::BeginChild("FormulaPreview",
-                        ImVec2(0, frameHeight), ImGuiChildFlags_Borders);
+                        ImVec2(0, frameHeight), ImGuiChildFlags_Border);
                     {
                         ImDrawList* drawList = ImGui::GetWindowDrawList();
                         Vec2 pos(ImGui::GetCursorScreenPos().x + 8.0f,
