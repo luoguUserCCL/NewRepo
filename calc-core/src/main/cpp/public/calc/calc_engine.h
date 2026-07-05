@@ -9,6 +9,7 @@
 #include <calc/variable_store.h>
 #include <calc/set_operations.h>
 #include <calc/number_format.h>
+#include <calc/symbolic_value.h>
 
 namespace calc {
 
@@ -42,6 +43,10 @@ public:
     /// Get/set the number format configuration
     NumberFormatConfig& formatConfig();
     const NumberFormatConfig& formatConfig() const;
+
+    /// Get/set the output mode (DECIMAL vs MATH/symbolic)
+    OutputMode outputMode() const;
+    void setOutputMode(OutputMode mode);
 
     /// Format a result for display
     std::string formatResult(const EvalResult& result) const;

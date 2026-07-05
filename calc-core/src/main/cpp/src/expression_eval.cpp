@@ -4,6 +4,7 @@
 #include <mpfr.h>
 #include <stdexcept>
 #include <cmath>
+#include <optional>
 
 namespace calc {
 
@@ -154,12 +155,69 @@ private:
         }
 
         // Arithmetic operators
+        // In MATH mode, if at least one operand is symbolic, try symbolic
+        // arithmetic to preserve exactness (e.g. 1/2 + 1/3 = 5/6,
+        // 2 * √2 = 2√2). Promote plain integer BigDecimals to SymbolicValue.
+        if (engine_.outputMode() == OutputMode::MATH &&
+            (left.isSymbolic() || right.isSymbolic())) {
+            auto toSym = [](const EvalResult& r) -> std::optional<SymbolicValue> {
+                if (r.isSymbolic()) return r.asSymbolic();
+                if (r.isNumber() && r.asNumber().isInteger())
+                    return SymbolicValue(r.asNumber().toInt64());
+                return std::nullopt;
+            };
+            auto ls = toSym(left);
+            auto rs = toSym(right);
+            if (ls && rs) {
+                try {
+                    switch (node.binaryOp) {
+                        case BinaryOp::ADD: {
+                            auto sv = ls->add(*rs);
+                            if (!sv.isZero() || (ls->isZero() && rs->isZero()))
+                                return EvalResult::makeSymbolic(sv);
+                            break;
+                        }
+                        case BinaryOp::SUB: {
+                            auto sv = ls->sub(*rs);
+                            if (!sv.isZero() || ls->isZero())
+                                return EvalResult::makeSymbolic(sv);
+                            break;
+                        }
+                        case BinaryOp::MUL:
+                            return EvalResult::makeSymbolic(ls->mul(*rs));
+                        case BinaryOp::DIV:
+                            if (!rs->isZero())
+                                return EvalResult::makeSymbolic(ls->div(*rs));
+                            break;
+                        default: break;
+                    }
+                } catch (...) {
+                    // Symbolic arithmetic failed — fall through to BigDecimal.
+                }
+            }
+        }
+
         BigDecimal result(int64_t(0));
         switch (node.binaryOp) {
             case BinaryOp::ADD: result = left.asNumber().add(right.asNumber()); break;
             case BinaryOp::SUB: result = left.asNumber().sub(right.asNumber()); break;
             case BinaryOp::MUL: result = left.asNumber().mul(right.asNumber()); break;
-            case BinaryOp::DIV: result = left.asNumber().div(right.asNumber()); break;
+            case BinaryOp::DIV: {
+                // In MATH output mode, try to preserve exact fractions when
+                // both operands are integers.
+                const auto& ln = left.asNumber();
+                const auto& rn = right.asNumber();
+                if (engine_.outputMode() == OutputMode::MATH &&
+                    ln.isInteger() && rn.isInteger() && !rn.isZero()) {
+                    // Exact rational: p/q
+                    int64_t p = ln.toInt64();
+                    int64_t q = rn.toInt64();
+                    SymbolicValue frac = SymbolicValue::rational(p, q);
+                    return EvalResult::makeSymbolic(frac);
+                }
+                result = ln.div(rn);
+                break;
+            }
             case BinaryOp::MOD: result = left.asNumber().mod(right.asNumber()); break;
             case BinaryOp::POW: result = left.asNumber().pow(right.asNumber()); break;
             default:
@@ -195,6 +253,27 @@ private:
         // ===== Iverson bracket with AST access =====
         if (name == "Iverson" && node.children.size() == 1) {
             return evaluateIverson(*node.children[0]);
+        }
+
+        // ===== sqrt in MATH mode: preserve √n for non-perfect-squares =====
+        if (name == "sqrt" && node.children.size() == 1 &&
+            engine_.outputMode() == OutputMode::MATH) {
+            auto arg = evaluate(*node.children[0]);
+            if (arg.isNumber() && arg.asNumber().isInteger() && arg.asNumber().isPositive()) {
+                int64_t n = arg.asNumber().toInt64();
+                // Check if n is a perfect square
+                int64_t root = static_cast<int64_t>(std::sqrt(static_cast<double>(n)));
+                // Adjust for floating-point imprecision
+                while (root * root < n) ++root;
+                while (root * root > n) --root;
+                if (root * root == n) {
+                    // Perfect square: √n = root (exact integer)
+                    return EvalResult::makeSymbolic(SymbolicValue(root));
+                }
+                // Non-perfect square: preserve as √n
+                return EvalResult::makeSymbolic(SymbolicValue::radical(n, 1, 1));
+            }
+            // Non-integer or negative: fall through to numeric sqrt
         }
 
         // Evaluate arguments
@@ -377,6 +456,7 @@ struct CalcEngine::Impl {
     FunctionRegistry functionRegistry;
     VariableStore variableStore;
     NumberFormatConfig formatConfig;
+    OutputMode outputMode = OutputMode::DECIMAL;
     std::string lastError;
 };
 
@@ -423,7 +503,15 @@ const VariableStore& CalcEngine::variables() const { return impl_->variableStore
 NumberFormatConfig& CalcEngine::formatConfig() { return impl_->formatConfig; }
 const NumberFormatConfig& CalcEngine::formatConfig() const { return impl_->formatConfig; }
 
+OutputMode CalcEngine::outputMode() const { return impl_->outputMode; }
+void CalcEngine::setOutputMode(OutputMode mode) { impl_->outputMode = mode; }
+
 std::string CalcEngine::formatResult(const EvalResult& result) const {
+    // In MATH mode, prefer symbolic representation when available.
+    if (impl_->outputMode == OutputMode::MATH && result.isSymbolic()) {
+        std::string s = result.asSymbolic().toString();
+        if (!s.empty()) return s;
+    }
     return NumberFormatter::format(result.asNumber(), impl_->formatConfig);
 }
 

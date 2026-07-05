@@ -209,4 +209,12 @@ EvalResult EvalResult::makeBoolean(bool value) {
     return r;
 }
 
+EvalResult EvalResult::makeSymbolic(const SymbolicValue& sv) {
+    EvalResult r;
+    r.type = Type::SYMBOLIC;
+    r.symbolicValue = sv;
+    r.numberValue = sv.toBigDecimal();  // also provide numeric fallback
+    return r;
+}
+
 } // namespace calc

@@ -6,6 +6,7 @@
 #include <memory>
 #include <variant>
 #include <calc/big_decimal.h>
+#include <calc/symbolic_value.h>
 
 namespace calc {
 
@@ -126,20 +127,24 @@ struct ASTNode {
  * Can be a BigDecimal value, a set, or a boolean (from Iverson).
  */
 struct EvalResult {
-    enum class Type { NUMBER, SET, BOOLEAN };
+    enum class Type { NUMBER, SET, BOOLEAN, SYMBOLIC };
 
     Type type;
     BigDecimal numberValue;
     bool boolValue = false;
+    SymbolicValue symbolicValue;  ///< SYMBOLIC (math output mode)
     // Set representation stored as string for now; full CalcSet in set_operations.h
 
     static EvalResult makeNumber(const BigDecimal& value);
     static EvalResult makeBoolean(bool value);
+    static EvalResult makeSymbolic(const SymbolicValue& sv);
 
     bool isNumber() const { return type == Type::NUMBER; }
     bool isBoolean() const { return type == Type::BOOLEAN; }
+    bool isSymbolic() const { return type == Type::SYMBOLIC; }
     const BigDecimal& asNumber() const { return numberValue; }
     bool asBoolean() const { return boolValue; }
+    const SymbolicValue& asSymbolic() const { return symbolicValue; }
 };
 
 } // namespace calc

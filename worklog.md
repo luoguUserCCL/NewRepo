@@ -59,3 +59,28 @@ Stage Summary:
 - CalcSet is move-only (holds unique_ptr in Computed); intersection/union build lazy Computed nodes. `contains()` recursively evaluates. Sets cannot currently be a first-class EvalResult value (evaluator collapses to 0).
 - MathRenderer is approximate — if the next agent needs pixel-accurate rendering, real font metrics from ImGui's glyph atlas must be wired into FontManager / LayoutNode::computeLayout.
 - Cross-module dependency graph: native-app → calc-core + render-engine; jni-bridge → calc-core; render-engine → calc-core (for ASTNode). No module depends on native-app or jni-bridge.
+
+---
+Task ID: 2
+Agent: main (C++ engine development)
+Task: Fix critical bugs and implement missing features in C++ calc engine
+
+Work Log:
+- Explored existing codebase: 39 files, ~5874 lines, ~80% complete
+- Fixed BigDecimal(int) overload trap causing MPFR assertion abort
+- Fixed parser tryParseParamList throwing on function calls
+- Fixed Iverson bracket infinite recursion segfault
+- Fixed BigDecimal toString() negative number formatting (-.4 → -4)
+- Added set difference operator '\' (BinaryOp::SET_DIFF)
+- Moved 'in' operator to comparison level (spec precedence level 8)
+- Added predefined sets Real/Rational/Integer (ℝ/ℚ/ℤ)
+- Made comparisons non-chainable per spec
+- Verified with 40+ test expressions
+
+Stage Summary:
+- All critical crashes fixed; engine runs stable
+- Core arithmetic, functions, variables, function definitions work
+- Set operations (cap/cup/diff/in), intervals, predefined sets work
+- Iverson brackets work with set/logic/relation predicates
+- Remaining: math output mode (fractions/√/π preservation), mod keyword alias
+- Commit: de664f1 pushed to origin/main
