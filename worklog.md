@@ -84,3 +84,51 @@ Stage Summary:
 - Iverson brackets work with set/logic/relation predicates
 - Remaining: math output mode (fractions/√/π preservation), mod keyword alias
 - Commit: de664f1 pushed to origin/main
+
+---
+Task ID: 3
+Agent: main (C++ engine development)
+Task: Implement math output mode with fractions, radicals, symbolic arithmetic
+
+Work Log:
+- Created SymbolicValue class (symbolic_value.h/.cpp) representing exact forms
+- Added OutputMode enum (DECIMAL/MATH) to CalcEngine
+- Extended EvalResult with SYMBOLIC type
+- DIV in MATH mode preserves integer/integer as gcd-reduced fraction
+- sqrt in MATH mode preserves √n with square-factor extraction
+- Arithmetic path promotes integers to SymbolicValue when mixed with symbolic
+- Verified: 1/2+1/3→5/6, sqrt(8)→2√2, 2*sqrt(2)→2√2, sqrt(2)*sqrt(2)→2
+- Both DECIMAL and MATH modes pass full regression
+
+Stage Summary:
+- Math output mode fully functional for fractions, radicals
+- Pi preservation implemented in SymbolicValue (hasPi_ flag) but not yet
+  wired into evaluator (would need to detect pi/e variable references
+  during evaluation — future enhancement)
+- All 40+ test expressions pass in both modes
+- Commit: 46604b5 pushed to origin/main
+
+---
+Task ID: 4
+Agent: main (cross-platform build verification)
+Task: Build and verify calc-core for Linux, Windows (-mwindows), macOS
+
+Work Log:
+- Created build-verify.sh for unified 3-platform build verification
+- Linux: compiled calc-core → static lib (479K) + test program, 14/14 tests pass
+- Windows: installed MSYS2 mingw-w64-x86_64-gmp/mpfr into MinGW sysroot
+- Windows: compiled calc-core → static lib (378K)
+- Windows: linked console test.exe (399K, PE32+ console)
+- Windows: linked -mwindows GUI test (133K, PE32+ subsystem=GUI)
+- Windows: linked full engine + -mwindows (sci-calc.exe, 3.4M, PE32+ GUI)
+- Discovered windows.h IN macro clash with BinaryOp::IN; fixed via include order
+- macOS: compiled 12 object files via Zig cc -target x86_64-macos.11.0
+- macOS: Mach-O 64-bit x86_64 object format verified
+
+Stage Summary:
+- All 3 targets compile successfully (Linux/Windows/macOS)
+- Linux: full build + test pass (14/14)
+- Windows: full static link with -mwindows, PE32+ GUI subsystem confirmed
+- macOS: compile-only (GMP/MPFR macOS libs needed for link — future work)
+- Commit: 0f7703a pushed to origin/main
+- build-verify.sh committed for reproducible verification

@@ -7,6 +7,10 @@ import java.nio.file.*;
  * Loads the native calculation engine library.
  * Extracts the appropriate native library from the JAR at runtime
  * based on the current operating system and architecture.
+ *
+ * JAR resource layout:
+ *   /jni/<os>/<arch>/libscicalc-native.<ext>
+ * e.g. /jni/linux/x86_64/libscicalc-native.so
  */
 public class NativeLoader {
     private static boolean loaded = false;
@@ -18,32 +22,33 @@ public class NativeLoader {
         if (loaded) return;
 
         try {
-            String libName = getNativeLibraryName();
-            String resourcePath = "native/" + libName;
+            String os = osName();
+            String arch = archName();
+            String libFile = libFileName(os);
 
-            // Try to extract from JAR
-            InputStream is = NativeLoader.class.getClassLoader()
-                .getResourceAsStream(resourcePath);
+            // Resource path inside the JAR: /jni/<os>/<arch>/<libFile>
+            String resourcePath = "/jni/" + os + "/" + arch + "/" + libFile;
+
+            InputStream is = NativeLoader.class.getResourceAsStream(resourcePath);
+            if (is == null) {
+                // Also try classloader path (without leading /)
+                is = NativeLoader.class.getClassLoader().getResourceAsStream(
+                    "jni/" + os + "/" + arch + "/" + libFile);
+            }
 
             if (is != null) {
-                // Extract to temp directory
-                File tempDir = new File(System.getProperty("java.io.tmpdir"), "calc-native");
+                // Extract to a temp file and load
+                File tempDir = new File(System.getProperty("java.io.tmpdir"), "scicalc-native");
                 tempDir.mkdirs();
-                File libFile = new File(tempDir, libName);
-
-                // Delete on exit
-                libFile.deleteOnExit();
-
-                // Copy library to temp file
-                Files.copy(is, libFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                File libFileOnDisk = new File(tempDir, libFile);
+                libFileOnDisk.deleteOnExit();
+                Files.copy(is, libFileOnDisk.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 is.close();
-
-                // Load the library
-                System.load(libFile.getAbsolutePath());
+                System.load(libFileOnDisk.getAbsolutePath());
                 loaded = true;
             } else {
                 // Fallback: try system library path
-                System.loadLibrary("calc-bridge");
+                System.loadLibrary("scicalc-native");
                 loaded = true;
             }
         } catch (IOException e) {
@@ -53,42 +58,26 @@ public class NativeLoader {
         }
     }
 
-    /**
-     * Determine the native library filename for the current platform.
-     */
-    private static String getNativeLibraryName() {
-        String os = System.getProperty("os.name").toLowerCase();
-        String arch = System.getProperty("os.arch").toLowerCase();
+    private static String osName() {
+        String s = System.getProperty("os.name", "").toLowerCase();
+        if (s.contains("linux"))   return "linux";
+        if (s.contains("mac"))     return "macos";
+        if (s.contains("windows")) return "windows";
+        return s;
+    }
 
-        String osPart;
-        if (os.contains("linux")) {
-            osPart = "linux";
-        } else if (os.contains("windows")) {
-            osPart = "windows";
-        } else if (os.contains("mac")) {
-            osPart = "macos";
-        } else {
-            osPart = "unknown";
+    private static String archName() {
+        String s = System.getProperty("os.arch", "").toLowerCase();
+        if (s.equals("x86_64") || s.equals("amd64")) return "x86_64";
+        if (s.equals("aarch64") || s.equals("arm64")) return "aarch64";
+        return s;
+    }
+
+    private static String libFileName(String os) {
+        switch (os) {
+            case "windows": return "scicalc-native.dll";
+            case "macos":   return "libscicalc-native.dylib";
+            default:        return "libscicalc-native.so";
         }
-
-        String archPart;
-        if (arch.contains("x86_64") || arch.contains("amd64")) {
-            archPart = "x86_64";
-        } else if (arch.contains("aarch64") || arch.contains("arm64")) {
-            archPart = "aarch64";
-        } else {
-            archPart = arch;
-        }
-
-        String ext;
-        if (os.contains("windows")) {
-            ext = ".dll";
-        } else if (os.contains("mac")) {
-            ext = ".dylib";
-        } else {
-            ext = ".so";
-        }
-
-        return "calc-bridge-" + osPart + "-" + archPart + ext;
     }
 }
