@@ -64,8 +64,8 @@ std::string BaseConverter::integerToBase(int64_t value, int base) {
 std::string BaseConverter::fractionToBase(const BigDecimal& frac, int base, int maxDigits) {
     std::string result;
     BigDecimal current = frac;
-    BigDecimal baseBD(base);
-    BigDecimal zero(0);
+    BigDecimal baseBD = BigDecimal(int64_t(base));
+    BigDecimal zero(int64_t(0));
 
     for (int i = 0; i < maxDigits; i++) {
         if (current.isZero()) break;

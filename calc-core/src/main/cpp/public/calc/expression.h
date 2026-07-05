@@ -44,6 +44,7 @@ enum class BinaryOp {
     IN,               ///< in → ∈
     CAP,              ///< cap → ∩
     CUP,              ///< cup → ∪
+    SET_DIFF,         ///< \ → set difference (A \ B)
     ADD,              ///< +
     SUB,              ///< -
     MUL,              ///< *

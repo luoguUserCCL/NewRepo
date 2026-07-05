@@ -59,7 +59,11 @@ static mpfr_rnd_t toMpfrRounding(RoundingMode rm) {
 
 BigDecimal::BigDecimal() : impl_(std::make_unique<Impl>(g_defaultPrecision.load())) {}
 
-BigDecimal::BigDecimal(int precision) : impl_(std::make_unique<Impl>(precision)) {}
+BigDecimal BigDecimal::withPrecision(int precision) {
+    BigDecimal r;
+    r.impl_ = std::make_unique<Impl>(precision);
+    return r;
+}
 
 BigDecimal::BigDecimal(const std::string& value, int precision)
     : impl_(std::make_unique<Impl>(precision)) {
@@ -104,19 +108,19 @@ BigDecimal& BigDecimal::operator=(const std::string& value) {
 // ==================== Arithmetic ====================
 
 BigDecimal BigDecimal::add(const BigDecimal& rhs, RoundingMode rm) const {
-    BigDecimal result(std::max(impl_->precision, rhs.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, rhs.impl_->precision));
     mpfr_add(result.impl_->value, impl_->value, rhs.impl_->value, toMpfrRounding(rm));
     return result;
 }
 
 BigDecimal BigDecimal::sub(const BigDecimal& rhs, RoundingMode rm) const {
-    BigDecimal result(std::max(impl_->precision, rhs.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, rhs.impl_->precision));
     mpfr_sub(result.impl_->value, impl_->value, rhs.impl_->value, toMpfrRounding(rm));
     return result;
 }
 
 BigDecimal BigDecimal::mul(const BigDecimal& rhs, RoundingMode rm) const {
-    BigDecimal result(std::max(impl_->precision, rhs.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, rhs.impl_->precision));
     mpfr_mul(result.impl_->value, impl_->value, rhs.impl_->value, toMpfrRounding(rm));
     return result;
 }
@@ -125,7 +129,7 @@ BigDecimal BigDecimal::div(const BigDecimal& rhs, RoundingMode rm) const {
     if (rhs.isZero()) {
         throw std::domain_error("Division by zero");
     }
-    BigDecimal result(std::max(impl_->precision, rhs.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, rhs.impl_->precision));
     mpfr_div(result.impl_->value, impl_->value, rhs.impl_->value, toMpfrRounding(rm));
     return result;
 }
@@ -134,38 +138,38 @@ BigDecimal BigDecimal::mod(const BigDecimal& rhs, RoundingMode rm) const {
     if (rhs.isZero()) {
         throw std::domain_error("Modulo by zero");
     }
-    BigDecimal result(std::max(impl_->precision, rhs.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, rhs.impl_->precision));
     // fmod: result = this - trunc(this/rhs) * rhs
     mpfr_fmod(result.impl_->value, impl_->value, rhs.impl_->value, toMpfrRounding(rm));
     return result;
 }
 
 BigDecimal BigDecimal::neg() const {
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     mpfr_neg(result.impl_->value, impl_->value, MPFR_RNDN);
     return result;
 }
 
 BigDecimal BigDecimal::abs() const {
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     mpfr_abs(result.impl_->value, impl_->value, MPFR_RNDN);
     return result;
 }
 
 BigDecimal BigDecimal::floor() const {
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     mpfr_floor(result.impl_->value, impl_->value);
     return result;
 }
 
 BigDecimal BigDecimal::ceil() const {
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     mpfr_ceil(result.impl_->value, impl_->value);
     return result;
 }
 
 BigDecimal BigDecimal::pow(int64_t exponent, RoundingMode rm) const {
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     // Fast exponentiation for integer exponents
     if (exponent >= 0) {
         // Use MPFR's optimized integer power
@@ -185,13 +189,13 @@ BigDecimal BigDecimal::pow(const BigDecimal& exponent, RoundingMode rm) const {
         return this->pow(expInt, rm);
     }
     // General case: this^exp = exp(exp * ln(this))
-    BigDecimal result(std::max(impl_->precision, exponent.impl_->precision));
+    BigDecimal result = BigDecimal::withPrecision(std::max(impl_->precision, exponent.impl_->precision));
     if (isZero()) {
         mpfr_set_zero(result.impl_->value, 1);
         return result;
     }
     // Compute ln(this)
-    BigDecimal lnThis(impl_->precision);
+    BigDecimal lnThis = BigDecimal::withPrecision(impl_->precision);
     mpfr_log(lnThis.impl_->value, impl_->value, toMpfrRounding(rm));
     // Compute exp * ln(this)
     BigDecimal product = exponent.mul(lnThis, rm);
@@ -204,7 +208,7 @@ BigDecimal BigDecimal::nthRoot(unsigned long n, RoundingMode rm) const {
     if (n == 0) {
         throw std::domain_error("Zero-th root is undefined");
     }
-    BigDecimal result(impl_->precision);
+    BigDecimal result = BigDecimal::withPrecision(impl_->precision);
     mpfr_rootn_ui(result.impl_->value, impl_->value, n, toMpfrRounding(rm));
     return result;
 }
@@ -248,7 +252,7 @@ std::string BigDecimal::toString(FormatMode mode, int digits, int base) const {
             std::string s(str);
             mpfr_free_str(str);
             // Format: d.dddde+ee
-            if (s.length() > 1) s.insert(1, 1, '.');
+            size_t sl = (!s.empty() && s[0] == '-') ? 1 : 0; if (s.length() > 1 + sl) s.insert(1 + sl, 1, '.');
             if (exp - 1 != 0) {
                 s += "e";
                 if (exp - 1 > 0) s += "+";
@@ -268,7 +272,7 @@ std::string BigDecimal::toString(FormatMode mode, int digits, int base) const {
             str = mpfr_get_str(nullptr, &exp, base, d, impl_->value, MPFR_RNDN);
             std::string s(str);
             mpfr_free_str(str);
-            if (s.length() > 1) s.insert(1, 1, '.');
+            size_t sl = (!s.empty() && s[0] == '-') ? 1 : 0; if (s.length() > 1 + sl) s.insert(1 + sl, 1, '.');
             if (exp - 1 != 0 && static_cast<size_t>(exp) != s.length()) {
                 s += "e";
                 if (exp - 1 > 0) s += "+";
@@ -283,12 +287,16 @@ std::string BigDecimal::toString(FormatMode mode, int digits, int base) const {
             str = mpfr_get_str(nullptr, &exp, base, d, impl_->value, MPFR_RNDN);
             std::string s(str);
             mpfr_free_str(str);
+            // mpfr_get_str prepends '-' for negatives; account for it when
+            // positioning the decimal point.
+            size_t signLen = (!s.empty() && s[0] == '-') ? 1 : 0;
             // If exponent is in reasonable range, use fixed-like format
             if (exp > -4 && exp < d + 1) {
                 // Insert decimal point at the right position
-                if (static_cast<size_t>(exp) <= s.length()) {
+                size_t insertPos = signLen + static_cast<size_t>(exp);
+                if (insertPos <= s.length()) {
                     if (exp > 0) {
-                        s.insert(exp, 1, '.');
+                        s.insert(insertPos, 1, '.');
                         // Remove trailing zeros
                         while (s.back() == '0') s.pop_back();
                         if (s.back() == '.') s.pop_back();
@@ -297,7 +305,7 @@ std::string BigDecimal::toString(FormatMode mode, int digits, int base) const {
                 return s;
             }
             // Otherwise use scientific
-            if (s.length() > 1) s.insert(1, 1, '.');
+            if (s.length() > 1 + signLen) s.insert(1 + signLen, 1, '.');
             s += "e";
             if (exp - 1 > 0) s += "+";
             s += std::to_string(exp - 1);
@@ -321,21 +329,21 @@ int64_t BigDecimal::toInt64() const {
 // ==================== Static utilities ====================
 
 BigDecimal BigDecimal::pi(int precision) {
-    BigDecimal result(precision);
+    BigDecimal result = BigDecimal::withPrecision(precision);
     mpfr_const_pi(result.impl_->value, MPFR_RNDN);
     return result;
 }
 
 BigDecimal BigDecimal::e(int precision) {
-    BigDecimal one(precision);
+    BigDecimal one = BigDecimal::withPrecision(precision);
     mpfr_set_ui(one.impl_->value, 1, MPFR_RNDN);
-    BigDecimal result(precision);
+    BigDecimal result = BigDecimal::withPrecision(precision);
     mpfr_exp(result.impl_->value, one.impl_->value, MPFR_RNDN);
     return result;
 }
 
 BigDecimal BigDecimal::fromBase(const std::string& value, int base, int precision) {
-    BigDecimal result(precision);
+    BigDecimal result = BigDecimal::withPrecision(precision);
     int b = (base >= 2 && base <= 16) ? base : 10;
     mpfr_set_str(result.impl_->value, value.c_str(), b, MPFR_RNDN);
     return result;
@@ -352,7 +360,7 @@ BigDecimal::MpfrAccess BigDecimal::getMpfrAccess() const {
 }
 
 BigDecimal BigDecimal::fromMpfrResult(std::function<void(mpfr_t)> mpfrFunc, int precision) {
-    BigDecimal result(precision);
+    BigDecimal result = BigDecimal::withPrecision(precision);
     mpfrFunc(result.impl_->value);
     return result;
 }

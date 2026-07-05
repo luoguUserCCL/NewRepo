@@ -47,17 +47,25 @@ public:
                 auto body = node.children[0]->clone();
                 engine_.functions().registerUserFunction(
                     node.identifier, node.paramNames, std::move(body));
-                return EvalResult::makeNumber(BigDecimal(0));
+                return EvalResult::makeNumber(BigDecimal(int64_t(0)));
             }
 
             case NodeType::SET_LITERAL:
             case NodeType::INTERVAL:
                 // Sets are primarily used with 'in', 'cap', 'cup' operators.
                 // When evaluated directly as a value, return 0.
-                return EvalResult::makeNumber(BigDecimal(0));
+                return EvalResult::makeNumber(BigDecimal(int64_t(0)));
 
             case NodeType::IVERSON:
-                return evaluateIverson(node);
+                // The IVERSON node stores its predicate as children[0].
+                // evaluateIverson evaluates the predicate and wraps as 0/1.
+                // Pass the CHILD, not the node itself, to avoid infinite
+                // recursion (evaluate(node) on an IVERSON node re-enters
+                // this case).
+                if (node.children.empty()) {
+                    throw std::runtime_error("Iverson bracket missing predicate");
+                }
+                return evaluateIverson(*node.children[0]);
 
             default:
                 throw std::runtime_error("Unknown node type in evaluation");
@@ -72,7 +80,7 @@ private:
         if (node.binaryOp == BinaryOp::AND) {
             auto left = evaluate(*node.children[0]);
             if (!IversonEvaluator::toBool(left.asNumber())) {
-                return EvalResult::makeNumber(BigDecimal(0));
+                return EvalResult::makeNumber(BigDecimal(int64_t(0)));
             }
             auto right = evaluate(*node.children[1]);
             return EvalResult::makeNumber(IversonEvaluator::fromBool(
@@ -82,40 +90,44 @@ private:
         if (node.binaryOp == BinaryOp::OR) {
             auto left = evaluate(*node.children[0]);
             if (IversonEvaluator::toBool(left.asNumber())) {
-                return EvalResult::makeNumber(BigDecimal(1));
+                return EvalResult::makeNumber(BigDecimal(int64_t(1)));
             }
             auto right = evaluate(*node.children[1]);
             return EvalResult::makeNumber(IversonEvaluator::fromBool(
                 IversonEvaluator::toBool(right.asNumber())));
         }
 
-        auto left = evaluate(*node.children[0]);
-        auto right = evaluate(*node.children[1]);
-
-        // Set membership: x in S → IversonEvaluator
+        // Set membership: x in S — must be handled BEFORE the generic
+        // left/right number evaluation, because S may be a set expression
+        // (predefined set, interval, cap/cup/diff) that cannot be evaluated
+        // as a BigDecimal.
         if (node.binaryOp == BinaryOp::IN) {
             auto leftVal = evaluate(*node.children[0]).asNumber();
-            auto rightAST = node.children[1].get();
-
-            // Evaluate right side as a set
-            CalcSet rightSet = evaluateToSet(*rightAST);
+            CalcSet rightSet = evaluateToSet(*node.children[1]);
             return EvalResult::makeNumber(
                 IversonEvaluator::evaluateMembership(leftVal, rightSet));
         }
 
-        // Set operations (cap → ∩, cup → ∪)
-        if (node.binaryOp == BinaryOp::CAP || node.binaryOp == BinaryOp::CUP) {
+        // Set operations (cap → ∩, cup → ∪, \ → difference) — same reason:
+        // operands are sets, not numbers.
+        if (node.binaryOp == BinaryOp::CAP ||
+            node.binaryOp == BinaryOp::CUP ||
+            node.binaryOp == BinaryOp::SET_DIFF) {
             CalcSet leftSet = evaluateToSet(*node.children[0]);
             CalcSet rightSet = evaluateToSet(*node.children[1]);
 
-            CalcSet result = (node.binaryOp == BinaryOp::CAP)
+            CalcSet resultSet = (node.binaryOp == BinaryOp::CAP)
                 ? leftSet.intersection(rightSet)
-                : leftSet.union_(rightSet);
+                : (node.binaryOp == BinaryOp::CUP)
+                    ? leftSet.union_(rightSet)
+                    : leftSet.difference(rightSet);
 
-            // Store set as a string representation for now
-            // Full set result support requires extending EvalResult
-            return EvalResult::makeNumber(BigDecimal(0));
+            (void)resultSet;
+            return EvalResult::makeNumber(BigDecimal(int64_t(0)));
         }
+
+        auto left = evaluate(*node.children[0]);
+        auto right = evaluate(*node.children[1]);
 
         // Comparison operators → Iverson-style (1 or 0)
         switch (node.binaryOp) {
@@ -142,7 +154,7 @@ private:
         }
 
         // Arithmetic operators
-        BigDecimal result(0);
+        BigDecimal result(int64_t(0));
         switch (node.binaryOp) {
             case BinaryOp::ADD: result = left.asNumber().add(right.asNumber()); break;
             case BinaryOp::SUB: result = left.asNumber().sub(right.asNumber()); break;
@@ -221,9 +233,9 @@ private:
         int64_t start = startVal.toInt64();
         int64_t end = endVal.toInt64();
 
-        BigDecimal result(0);
+        BigDecimal result(int64_t(0));
         for (int64_t i = start; i <= end; i++) {
-            engine_.variables().set(varName, BigDecimal(i));
+            engine_.variables().set(varName, BigDecimal(int64_t(i)));
             auto termResult = evaluate(*node.children[3]);
             result = result.add(termResult.asNumber());
         }
@@ -244,9 +256,9 @@ private:
         int64_t start = startVal.toInt64();
         int64_t end = endVal.toInt64();
 
-        BigDecimal result(1);
+        BigDecimal result(int64_t(1));
         for (int64_t i = start; i <= end; i++) {
-            engine_.variables().set(varName, BigDecimal(i));
+            engine_.variables().set(varName, BigDecimal(int64_t(i)));
             auto termResult = evaluate(*node.children[3]);
             result = result.mul(termResult.asNumber());
         }
@@ -297,7 +309,8 @@ private:
 
     /**
      * Evaluate an AST node to a CalcSet.
-     * Handles SET_LITERAL, INTERVAL, and cap/cup binary operations.
+     * Handles SET_LITERAL, INTERVAL, cap/cup/diff binary operations, and
+     * predefined set constants (Real, Rational, Quotient, Integer, Zahlen).
      */
     CalcSet evaluateToSet(const ASTNode& node) {
         switch (node.type) {
@@ -311,7 +324,6 @@ private:
             case NodeType::INTERVAL: {
                 auto low = evaluate(*node.children[0]).asNumber();
                 auto high = evaluate(*node.children[1]).asNumber();
-                // Convert BoundType from expression.h to CalcSet::BoundType
                 auto toSetBound = [](BoundType bt) -> CalcSet::BoundType {
                     return bt == BoundType::CLOSED
                         ? CalcSet::BoundType::CLOSED
@@ -320,6 +332,18 @@ private:
                 return CalcSet::makeInterval(toSetBound(node.leftBound),
                     toSetBound(node.rightBound),
                     std::move(low), std::move(high));
+            }
+            case NodeType::VARIABLE_REF: {
+                // Predefined set constants: Real (ℝ), Rational/Quotient (ℚ),
+                // Integer/Zahlen (ℤ). These are recognized by name, not via
+                // the variable store (which holds BigDecimal values).
+                const std::string& name = node.identifier;
+                if (name == "Real")     return CalcSet::makePredefined(CalcSet::PredefinedSet::REAL);
+                if (name == "Rational" || name == "Quotient")
+                    return CalcSet::makePredefined(CalcSet::PredefinedSet::RATIONAL);
+                if (name == "Integer" || name == "Zahlen")
+                    return CalcSet::makePredefined(CalcSet::PredefinedSet::INTEGER);
+                break;
             }
             case NodeType::BINARY_OP: {
                 if (node.binaryOp == BinaryOp::CAP) {
@@ -331,6 +355,11 @@ private:
                     auto left = evaluateToSet(*node.children[0]);
                     auto right = evaluateToSet(*node.children[1]);
                     return left.union_(right);
+                }
+                if (node.binaryOp == BinaryOp::SET_DIFF) {
+                    auto left = evaluateToSet(*node.children[0]);
+                    auto right = evaluateToSet(*node.children[1]);
+                    return left.difference(right);
                 }
                 break;
             }
@@ -366,7 +395,7 @@ EvalResult CalcEngine::evaluate(const std::string& input) {
         return evaluator.evaluate(*ast);
     } catch (const std::exception& e) {
         impl_->lastError = e.what();
-        return EvalResult::makeNumber(BigDecimal(0));
+        return EvalResult::makeNumber(BigDecimal(int64_t(0)));
     }
 }
 
@@ -381,7 +410,7 @@ EvalResult CalcEngine::evaluateAST(const ASTNode& node) {
         return evaluator.evaluate(node);
     } catch (const std::exception& e) {
         impl_->lastError = e.what();
-        return EvalResult::makeNumber(BigDecimal(0));
+        return EvalResult::makeNumber(BigDecimal(int64_t(0)));
     }
 }
 

@@ -61,7 +61,17 @@ private:
     // Internal helpers
     std::vector<std::unique_ptr<ASTNode>> parseArgList();
     std::string tryParseIdentifier();
-    std::vector<std::string> tryParseParamList();
+
+    /// Result of attempting to parse a function-definition parameter list.
+    /// `valid` is false if the content inside parens is NOT a valid param
+    /// list (e.g. it's actually a function-call argument list like `-5` or
+    /// `2, 3`). This makes tryParseParamList non-throwing, so the caller can
+    /// backtrack cleanly.
+    struct ParamListResult {
+        std::vector<std::string> names;
+        bool valid = false;
+    };
+    ParamListResult tryParseParamList();
 };
 
 } // namespace calc

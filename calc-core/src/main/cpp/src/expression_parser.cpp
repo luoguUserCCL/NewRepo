@@ -72,7 +72,8 @@ bool ExpressionParser::matchKeyword(const std::string& token) {
 
 std::unique_ptr<ASTNode> ExpressionParser::parseDefinition() {
     // Try to match: identifier ':=' expr  or  identifier(params) ':=' expr
-    // We need lookahead for this
+    // Must be non-throwing: on any failure, restore position and fall through
+    // to parseLogicalOr() so function CALLS like abs(-5) are parsed normally.
     size_t savePos = pos_;
     std::string name = tryParseIdentifier();
 
@@ -81,21 +82,26 @@ std::unique_ptr<ASTNode> ExpressionParser::parseDefinition() {
 
         // Check for function definition: name(params) := expr
         if (pos_ < input_.length() && input_[pos_] == '(') {
-            // Could be function definition or function call
-            size_t parenPos = pos_;
             pos_++; // skip '('
+            // tryParseParamList is non-throwing: returns {valid=false} on failure.
             auto params = tryParseParamList();
-            skipWhitespace();
-            if (matchKeyword(":=")) {
-                // Function definition
-                auto body = parseLogicalOr();
-                return ASTNode::makeDefineFunc(name, std::move(params), std::move(body));
+            if (params.valid) {
+                skipWhitespace();
+                if (match(')')) {
+                    skipWhitespace();
+                    if (matchKeyword(":=")) {
+                        // Function definition confirmed
+                        auto body = parseLogicalOr();
+                        return ASTNode::makeDefineFunc(name, std::move(params.names), std::move(body));
+                    }
+                }
             }
-            // Not a definition, restore position
+            // Not a function definition, restore position
             pos_ = savePos;
         }
 
         // Check for variable definition: name := expr
+        skipWhitespace();
         if (matchKeyword(":=")) {
             auto value = parseLogicalOr();
             return ASTNode::makeDefineVar(name, std::move(value));
@@ -142,11 +148,13 @@ std::unique_ptr<ASTNode> ExpressionParser::parseComparison() {
     if (matchKeyword("!=") || matchKeyword("\xe2\x89\xa0"))       op = BinaryOp::NEQ;  // ≠
     else if (matchKeyword("<=") || matchKeyword("\xe2\x89\xa4"))   op = BinaryOp::LEQ;  // ≤
     else if (matchKeyword(">=") || matchKeyword("\xe2\x89\xa5"))   op = BinaryOp::GEQ;  // ≥
+    else if (matchKeyword("in"))                                   op = BinaryOp::IN;   // in (∈)
     else if (match('='))              op = BinaryOp::EQ;
     else if (match('<'))              op = BinaryOp::LT;
     else if (match('>'))              op = BinaryOp::GT;
     else return left;
 
+    // Per spec: relations are non-chainable — only ONE comparison per level.
     auto right = parseSetOps();
     return ASTNode::makeBinary(op, std::move(left), std::move(right));
 }
@@ -162,9 +170,10 @@ std::unique_ptr<ASTNode> ExpressionParser::parseSetOps() {
         } else if (matchKeyword("cup")) {
             auto right = parseAdditive();
             left = ASTNode::makeBinary(BinaryOp::CUP, std::move(left), std::move(right));
-        } else if (matchKeyword("in")) {
+        } else if (match('\\')) {
+            // Set difference A \ B (exclude). Backslash is a single-char token.
             auto right = parseAdditive();
-            left = ASTNode::makeBinary(BinaryOp::IN, std::move(left), std::move(right));
+            left = ASTNode::makeBinary(BinaryOp::SET_DIFF, std::move(left), std::move(right));
         } else {
             break;
         }
@@ -425,25 +434,36 @@ std::string ExpressionParser::tryParseIdentifier() {
     return input_.substr(start, pos_ - start);
 }
 
-std::vector<std::string> ExpressionParser::tryParseParamList() {
-    std::vector<std::string> params;
+ExpressionParser::ParamListResult ExpressionParser::tryParseParamList() {
+    // Non-throwing: returns {valid=false} if the content inside parens is not
+    // a valid parameter list (identifiers separated by commas). The caller
+    // restores position on failure, so function CALLS like abs(-5) are handled
+    // correctly by the normal expression parser.
+    ParamListResult result;
     skipWhitespace();
-    if (peek() == ')') return params;
+    if (peek() == ')') {
+        result.valid = true;  // empty param list: f() := ...
+        return result;
+    }
 
     std::string name = tryParseIdentifier();
     if (name.empty()) {
-        throw std::runtime_error("Expected parameter name in function definition");
+        return result;  // valid stays false
     }
-    params.push_back(name);
+    result.names.push_back(name);
 
-    while (match(',')) {
+    while (true) {
+        skipWhitespace();
+        if (!match(',')) break;
+        skipWhitespace();
         name = tryParseIdentifier();
         if (name.empty()) {
-            throw std::runtime_error("Expected parameter name after ','");
+            return ParamListResult{};  // invalid: comma not followed by identifier
         }
-        params.push_back(name);
+        result.names.push_back(name);
     }
-    return params;
+    result.valid = true;
+    return result;
 }
 
 } // namespace calc

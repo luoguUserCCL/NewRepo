@@ -73,11 +73,11 @@ BigDecimal CryptoRandom::uniform(const BigDecimal& minimum,
 
     // Convert random bytes to a BigDecimal in [0, 1)
     // fraction = sum(randBytes[i] * 256^(bytes-1-i)) / 256^bytes
-    BigDecimal fraction(0);
-    BigDecimal scale(1);
+    BigDecimal fraction(int64_t(0));
+    BigDecimal scale(int64_t(1));
     for (int i = bytes - 1; i >= 0; i--) {
         fraction = fraction.add(BigDecimal(static_cast<int64_t>(randBytes[i])).mul(scale));
-        scale = scale.mul(BigDecimal(256));
+        scale = scale.mul(BigDecimal(int64_t(256)));
     }
     fraction = fraction.div(scale);
 

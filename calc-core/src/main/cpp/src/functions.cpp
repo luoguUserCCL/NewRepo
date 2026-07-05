@@ -67,7 +67,7 @@ void FunctionRegistry::registerBuiltins() {
     // Registered here for lookup/rendering only.
     builtins_["sum"] = BuiltinEntry{
         [](const std::vector<BigDecimal>&) -> BigDecimal {
-            return BigDecimal(0); // Placeholder; real eval in ExpressionEvaluator
+            return BigDecimal(int64_t(0)); // Placeholder; real eval in ExpressionEvaluator
         },
         RenderSpec{RenderSpec::Type::SUM, "Σ"},
         4, 4
@@ -76,7 +76,7 @@ void FunctionRegistry::registerBuiltins() {
     // ===== prod(i, start, end, expr) → Π =====
     builtins_["prod"] = BuiltinEntry{
         [](const std::vector<BigDecimal>&) -> BigDecimal {
-            return BigDecimal(0); // Placeholder; real eval in ExpressionEvaluator
+            return BigDecimal(int64_t(0)); // Placeholder; real eval in ExpressionEvaluator
         },
         RenderSpec{RenderSpec::Type::PRODUCT, "Π"},
         4, 4
@@ -112,7 +112,7 @@ void FunctionRegistry::registerBuiltins() {
         [](const std::vector<BigDecimal>& args) -> BigDecimal {
             BigDecimal a = args[0].abs();
             BigDecimal b = args[1].abs();
-            if (a.isZero() || b.isZero()) return BigDecimal(0);
+            if (a.isZero() || b.isZero()) return BigDecimal(int64_t(0));
             // Compute gcd inline to avoid recursive lookup
             BigDecimal ga = a, gb = b;
             while (!gb.isZero()) {

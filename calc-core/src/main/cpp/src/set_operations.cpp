@@ -26,6 +26,12 @@ CalcSet CalcSet::makeComputed(SetOp op, CalcSet left, CalcSet right) {
     return s;
 }
 
+CalcSet CalcSet::makePredefined(PredefinedSet kind) {
+    CalcSet s;
+    s.data_ = kind;
+    return s;
+}
+
 // ==================== CalcSet Operations ====================
 
 bool CalcSet::contains(const BigDecimal& value) const {
@@ -49,11 +55,30 @@ bool CalcSet::contains(const BigDecimal& value) const {
             }
             return true;
         } else if constexpr (std::is_same_v<T, Computed>) {
-            if (d.op == SetOp::UNION) {
-                return d.left->contains(value) || d.right->contains(value);
-            } else {
-                return d.left->contains(value) && d.right->contains(value);
+            switch (d.op) {
+                case SetOp::UNION:
+                    return d.left->contains(value) || d.right->contains(value);
+                case SetOp::INTERSECTION:
+                    return d.left->contains(value) && d.right->contains(value);
+                case SetOp::DIFFERENCE:
+                    // A \ B: in A and NOT in B
+                    return d.left->contains(value) && !d.right->contains(value);
             }
+            return false;
+        } else if constexpr (std::is_same_v<T, PredefinedSet>) {
+            switch (d) {
+                case PredefinedSet::REAL:
+                    // Every finite BigDecimal is a real number.
+                    return !value.isNaN() && !value.isInfinite();
+                case PredefinedSet::RATIONAL:
+                    // All finite BigDecimals are rational (finite decimal
+                    // expansions are rational). MPFR values are always
+                    // rational (mantissa * 2^exp).
+                    return !value.isNaN() && !value.isInfinite();
+                case PredefinedSet::INTEGER:
+                    return value.isInteger();
+            }
+            return false;
         }
         return false;
     }, data_);
@@ -67,6 +92,10 @@ CalcSet CalcSet::union_(const CalcSet& other) const {
     return makeComputed(SetOp::UNION, clone(), other.clone());
 }
 
+CalcSet CalcSet::difference(const CalcSet& other) const {
+    return makeComputed(SetOp::DIFFERENCE, clone(), other.clone());
+}
+
 CalcSet CalcSet::clone() const {
     return std::visit([](const auto& d) -> CalcSet {
         using T = std::decay_t<decltype(d)>;
@@ -76,6 +105,8 @@ CalcSet CalcSet::clone() const {
             return makeInterval(d.leftBound, d.rightBound, d.low, d.high);
         } else if constexpr (std::is_same_v<T, Computed>) {
             return makeComputed(d.op, d.left->clone(), d.right->clone());
+        } else if constexpr (std::is_same_v<T, PredefinedSet>) {
+            return makePredefined(d);
         }
         return makeEnumerated({});
     }, data_);
@@ -99,8 +130,20 @@ std::string CalcSet::toString() const {
             s += (d.rightBound == BoundType::CLOSED ? "]" : ")");
             return s;
         } else if constexpr (std::is_same_v<T, Computed>) {
-            std::string opStr = (d.op == SetOp::UNION) ? " cup " : " cap ";
+            const char* opStr;
+            switch (d.op) {
+                case SetOp::UNION:        opStr = " cup "; break;
+                case SetOp::INTERSECTION: opStr = " cap "; break;
+                case SetOp::DIFFERENCE:   opStr = " \\ ";  break;
+            }
             return d.left->toString() + opStr + d.right->toString();
+        } else if constexpr (std::is_same_v<T, PredefinedSet>) {
+            switch (d) {
+                case PredefinedSet::REAL:     return "Real";
+                case PredefinedSet::RATIONAL: return "Rational";
+                case PredefinedSet::INTEGER:  return "Integer";
+            }
+            return "?";
         }
         return "{}";
     }, data_);
@@ -145,7 +188,7 @@ bool IversonEvaluator::toBool(const BigDecimal& value) {
 }
 
 BigDecimal IversonEvaluator::fromBool(bool value) {
-    return BigDecimal(value ? 1 : 0);
+    return BigDecimal(int64_t(value ? 1 : 0));
 }
 
 } // namespace calc

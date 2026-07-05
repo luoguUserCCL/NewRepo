@@ -39,7 +39,11 @@ public:
     static constexpr int DEFAULT_PRECISION = 256;
 
     BigDecimal();
-    explicit BigDecimal(int precision);
+    /// Construct with a specific precision. Use this static factory instead
+    /// of a bare BigDecimal(int) to avoid the C++ overload-resolution trap
+    /// where BigDecimal(0) matches the precision constructor instead of the
+    /// int64_t value constructor.
+    static BigDecimal withPrecision(int precision);
     BigDecimal(const std::string& value, int precision = DEFAULT_PRECISION);
     BigDecimal(double value, int precision = DEFAULT_PRECISION);
     BigDecimal(int64_t value, int precision = DEFAULT_PRECISION);
@@ -103,6 +107,12 @@ public:
     static int getDefaultPrecision();
     static void setDefaultPrecision(int precision);
     int getPrecision() const;
+
+    // NOTE: there is deliberately NO `BigDecimal(int)` constructor.
+    // It would shadow `BigDecimal(int64_t value, ...)` for literals like
+    // BigDecimal(0) due to C++ overload resolution (int matches int exactly,
+    // beating the int→int64_t conversion). Use withPrecision() for precision
+    // construction, or BigDecimal(int64_t(x)) for value construction.
 
     // MPFR direct access — allows functions.cpp to use MPFR directly
     // for high-precision trig/log operations without losing precision

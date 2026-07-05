@@ -45,7 +45,7 @@ public:
      * Computed set from set operations (union/intersection).
      * Stores operands for lazy evaluation.
      */
-    enum class SetOp { UNION, INTERSECTION };
+    enum class SetOp { UNION, INTERSECTION, DIFFERENCE };
 
     struct Computed {
         SetOp op;
@@ -53,7 +53,10 @@ public:
         std::unique_ptr<CalcSet> right;
     };
 
-    using Data = std::variant<Enumerated, Interval, Computed>;
+    /// Predefined mathematical sets: ℝ (Real), ℚ (Rational), ℤ (Integer/Zahlen)
+    enum class PredefinedSet { REAL, RATIONAL, INTEGER };
+
+    using Data = std::variant<Enumerated, Interval, Computed, PredefinedSet>;
 
     // ==================== Construction ====================
 
@@ -64,8 +67,11 @@ public:
     static CalcSet makeInterval(BoundType left, BoundType right,
                                  BigDecimal low, BigDecimal high);
 
-    /// Create a computed set (union or intersection)
+    /// Create a computed set (union, intersection, or difference)
     static CalcSet makeComputed(SetOp op, CalcSet left, CalcSet right);
+
+    /// Create a predefined set (Real, Rational, Integer)
+    static CalcSet makePredefined(PredefinedSet kind);
 
     // ==================== Operations ====================
 
@@ -77,6 +83,9 @@ public:
 
     /// Set union (cup → ∪)
     CalcSet union_(const CalcSet& other) const;
+
+    /// Set difference (A \ B → exclude elements of B from A)
+    CalcSet difference(const CalcSet& other) const;
 
     /// Deep clone (CalcSet is move-only due to unique_ptr)
     CalcSet clone() const;

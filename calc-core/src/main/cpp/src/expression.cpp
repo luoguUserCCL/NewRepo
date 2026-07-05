@@ -128,6 +128,7 @@ static std::string opToString(BinaryOp op) {
         case BinaryOp::IN:     return "in";
         case BinaryOp::CAP:    return "cap";
         case BinaryOp::CUP:    return "cup";
+        case BinaryOp::SET_DIFF: return "\\";
         case BinaryOp::ADD:    return "+";
         case BinaryOp::SUB:    return "-";
         case BinaryOp::MUL:    return "*";
@@ -204,7 +205,7 @@ EvalResult EvalResult::makeBoolean(bool value) {
     EvalResult r;
     r.type = Type::BOOLEAN;
     r.boolValue = value;
-    r.numberValue = BigDecimal(value ? 1 : 0);
+    r.numberValue = BigDecimal(int64_t(value ? 1 : 0));
     return r;
 }
 
