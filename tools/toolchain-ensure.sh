@@ -289,21 +289,22 @@ EOF
     chmod +x "$f"
   }
 
-  # macOS x86_64
-  make_wrapper x86_64-apple-darwin-clang    cc  x86_64-macos-gnu
-  make_wrapper x86_64-apple-darwin-clang++  c++ x86_64-macos-gnu
-  # macOS arm64
-  make_wrapper aarch64-apple-darwin-clang   cc  aarch64-macos-gnu
-  make_wrapper aarch64-apple-darwin-clang++ c++ aarch64-macos-gnu
+  # macOS x86_64 — Zig 0.17.0-dev uses <arch>-macos.<ver> (NOT -macos-gnu).
+  # 11.0 is the oldest with full libc; zig ships its own macOS libc.
+  make_wrapper x86_64-apple-darwin-clang    cc  x86_64-macos.11.0
+  make_wrapper x86_64-apple-darwin-clang++  c++ x86_64-macos.11.0
+  # macOS arm64 (Apple Silicon)
+  make_wrapper aarch64-apple-darwin-clang   cc  aarch64-macos.11.0
+  make_wrapper aarch64-apple-darwin-clang++ c++ aarch64-macos.11.0
   # generic clang/clang++ pointing at macOS x86_64 by default (Gradle's
   # clang detector needs a plain `clang` on PATH to register the toolchain).
   cat > "$wdir/clang"   <<'EOF'
 #!/usr/bin/env bash
-exec "$(dirname "$0")/../zig/zig" cc -target x86_64-macos-gnu "$@"
+exec "$(dirname "$0")/../zig/zig" cc -target x86_64-macos.11.0 "$@"
 EOF
   cat > "$wdir/clang++" <<'EOF'
 #!/usr/bin/env bash
-exec "$(dirname "$0")/../zig/zig" c++ -target x86_64-macos-gnu "$@"
+exec "$(dirname "$0")/../zig/zig" c++ -target x86_64-macos.11.0 "$@"
 EOF
   chmod +x "$wdir/clang" "$wdir/clang++"
 
